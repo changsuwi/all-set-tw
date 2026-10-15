@@ -11,6 +11,7 @@
   let {
     flow,
     slices,
+    total,
     selectedCategory,
     flowSelected,
     dataIncomplete = false,
@@ -19,6 +20,8 @@
   }: {
     flow: ActivityFlow;
     slices: ActivityCategorySlice[];
+    /** Net flow total; can be below the slices when refunds cover a category. */
+    total: number;
     selectedCategory?: string;
     flowSelected: boolean;
     dataIncomplete?: boolean;
@@ -28,7 +31,6 @@
 
   const title = $derived(flow === "income" ? "收入分類" : "支出分類");
   const flowLabel = $derived(flow === "income" ? "收入" : "支出");
-  const total = $derived(slices.reduce((sum, slice) => sum + slice.amount, 0));
   const chartConfig: ChartConfig = {
     default: { label: "金額", color: "#3e6f7c" },
   };

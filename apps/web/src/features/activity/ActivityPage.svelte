@@ -72,7 +72,7 @@
   } from "./model/filter";
   import {
     buildActivityCategorySlices,
-    activityCashAmountTwd,
+    activityFlowTotalTwd,
     activityDisplayAmount,
     activityAmountTwd,
   } from "./model/chart";
@@ -456,10 +456,10 @@
     buildActivityCategorySlices(monthlyCalculatedItems, "expense", rateValues),
   );
   const incomeTotal = $derived(
-    incomeSlices.reduce((sum, slice) => sum + slice.amount, 0),
+    activityFlowTotalTwd(monthlyCalculatedItems, "income", rateValues),
   );
   const expenseTotal = $derived(
-    expenseSlices.reduce((sum, slice) => sum + slice.amount, 0),
+    activityFlowTotalTwd(monthlyCalculatedItems, "expense", rateValues),
   );
   const currentMonth = currentActivityMonthKey();
   const selectedMonthLabel = $derived(`${Number(selectedMonth.slice(5))} 月`);
@@ -474,18 +474,8 @@
       );
       return {
         month,
-        income: items.reduce(
-          (sum, item) =>
-            sum + Math.max(activityCashAmountTwd(item, rateValues), 0),
-          0,
-        ),
-        expense: Math.abs(
-          items.reduce(
-            (sum, item) =>
-              sum + Math.min(activityCashAmountTwd(item, rateValues), 0),
-            0,
-          ),
-        ),
+        income: activityFlowTotalTwd(items, "income", rateValues),
+        expense: activityFlowTotalTwd(items, "expense", rateValues),
       };
     }),
   );
@@ -1007,6 +997,7 @@
           <ActivityCategoryChart
             flow="income"
             slices={incomeSlices}
+            total={incomeTotal}
             selectedCategory={selectedCategory?.flow === "income"
               ? selectedCategory.category
               : undefined}
@@ -1018,6 +1009,7 @@
           <ActivityCategoryChart
             flow="expense"
             slices={expenseSlices}
+            total={expenseTotal}
             selectedCategory={selectedCategory?.flow === "expense"
               ? selectedCategory.category
               : undefined}
