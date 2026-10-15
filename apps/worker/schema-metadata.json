@@ -226,7 +226,7 @@
         "id": "持倉快照的系統識別碼。",
         "connector_id": "產生此持倉的外部連接器識別碼。",
         "source_id": "外部來源系統提供的持倉識別碼。",
-        "asset_type": "資產類型，目前限制為 stock、etf 或 fund。",
+        "asset_type": "資產類型，目前限制為 stock、etf、fund 或 crypto（鏈上錢包）。",
         "symbol": "證券、基金或 ETF 的代號。",
         "name": "投資標的名稱。",
         "quantity": "持有數量。",
@@ -252,7 +252,7 @@
         "broker_name": "券商或交易機構名稱。",
         "symbol": "交易標的代號。",
         "name": "交易標的名稱。",
-        "asset_type": "資產類型，例如 stock、etf、fund、bond 或 unknown。",
+        "asset_type": "資產類型，例如 stock、etf、fund、bond、crypto 或 unknown。",
         "trade_date": "交易發生日期。",
         "posted_date": "交易正式入帳日期。",
         "transaction_code": "外部系統的交易類型代碼。",
@@ -331,8 +331,8 @@
         "id": "歷史點的系統識別碼。",
         "date": "此數值所代表的日期。",
         "net_worth": "該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。",
-        "asset_type": "資產類型，例如 total、deposit、stock、fund 或手動資產 id。",
-        "source": "數值來源，例如 bank 或 manual。",
+        "asset_type": "資產類型，例如 total、deposit、stock、fund、crypto 或手動資產 id。",
+        "source": "數值來源，例如 bank、manual 或產生此歷史的 connector id（如 tdcc、bitcoin）。",
         "snapshotted_at": "此歷史點實際建立或重算的時間。"
       }
     },

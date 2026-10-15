@@ -11,10 +11,13 @@
     investmentTransactionsQuery,
   } from "@/data/investments/queries";
   import type { InvestmentTransactionRow } from "@/data/investments/types";
+  import { formatTradeQuantity } from "@taiwan-fin-hub/shared";
   import {
+    formatAssetType,
     formatCurrency,
     formatDate,
     formatNumber,
+    formatPositionQuantity,
     rateMap,
   } from "@/shared/format/financial";
   let { api }: { api: ApiClient } = $props();
@@ -54,8 +57,7 @@
   function tradeDisplay(t: InvestmentTransactionRow) {
     if (t.amount != null && t.price != null && t.price !== 1)
       return formatCurrency(t.amount, t.currency);
-    if (t.quantity != null) return `${formatNumber(t.quantity)} 股`;
-    return "金額未提供";
+    return formatTradeQuantity(t) ?? "金額未提供";
   }
 </script>
 
@@ -128,9 +130,13 @@
                   <td class="py-3 pr-4 font-semibold">
                     {p.symbol ? `${p.symbol} ` : ""}{p.name}
                   </td>
-                  <td class="px-4 py-3">{p.assetType.toUpperCase()}</td>
+                  <td class="px-4 py-3">{formatAssetType(p.assetType)}</td>
                   <td class="px-4 py-3">
-                    {p.quantity == null ? "-" : formatNumber(p.quantity)}
+                    {p.quantity == null
+                      ? "-"
+                      : p.assetType === "crypto"
+                        ? formatPositionQuantity(p)
+                        : formatNumber(p.quantity)}
                   </td>
                   <td class="px-4 py-3 text-right font-semibold tabular-nums">
                     {formatCurrency(
@@ -154,7 +160,7 @@
                   {p.symbol ? `${p.symbol} ` : ""}{p.name}
                 </p>
                 <p class="mt-1 text-caption text-subtle">
-                  {p.quantity ?? 0} 單位 · {p.assetType.toUpperCase()}
+                  {formatPositionQuantity(p)} · {formatAssetType(p.assetType)}
                 </p>
               </div>
               <p class="shrink-0 font-medium tabular-nums text-steel">
@@ -177,6 +183,7 @@
           <option value="stock">股票</option>
           <option value="etf">ETF</option>
           <option value="fund">基金</option>
+          <option value="crypto">加密貨幣</option>
         </Select>
       </div>
       {#if $trades.isPending}

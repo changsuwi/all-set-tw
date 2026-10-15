@@ -3,10 +3,12 @@
     InvestmentRow,
     InvestmentTransactionRow,
   } from "@/data/investments/types";
+  import { formatTradeQuantity } from "@taiwan-fin-hub/shared";
   import {
+    formatAssetType,
     formatCurrency,
     formatDate,
-    formatNumber,
+    formatPositionQuantity,
   } from "@/shared/format/financial";
 
   let {
@@ -30,8 +32,7 @@
   function tradeDisplay(trade: InvestmentTransactionRow) {
     if (trade.amount != null && trade.price != null && trade.price !== 1)
       return formatCurrency(trade.amount, trade.currency);
-    if (trade.quantity != null) return `${formatNumber(trade.quantity)} 股`;
-    return "金額未提供";
+    return formatTradeQuantity(trade) ?? "金額未提供";
   }
 </script>
 
@@ -94,8 +95,8 @@
                   {position.symbol ? `${position.symbol} ` : ""}{position.name}
                 </p>
                 <p class="mt-1 text-caption text-subtle">
-                  {position.assetType.toUpperCase()} · {position.currency} ·
-                  {formatNumber(position.quantity ?? 0)} 單位
+                  {formatAssetType(position.assetType)} · {position.currency} ·
+                  {formatPositionQuantity(position)}
                 </p>
               </div>
               <p class="text-right text-sm font-medium tabular-nums text-steel">

@@ -69,7 +69,9 @@ function registerConnectorSettingsRoutes(api: Hono<AppBindings>) {
               success: false,
               error: {
                 code: "INVALID_CONNECTOR_CONFIG",
-                message: "Connector config does not match the expected shape.",
+                message:
+                  error.message ||
+                  "Connector config does not match the expected shape.",
               },
             },
             400,

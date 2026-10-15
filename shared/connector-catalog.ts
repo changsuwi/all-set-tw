@@ -17,11 +17,14 @@ export type ConnectorCapability =
   | "investment_transaction"
   | "net_worth_history";
 
-/** 前端設定表單使用的帳密欄位；`key` 同時是 Worker 解析設定時的欄位名稱。 */
+/**
+ * 前端設定表單使用的帳密欄位；`key` 同時是 Worker 解析設定時的欄位名稱。
+ * `multiline` 以多行輸入框填寫，例如每行一個錢包地址。
+ */
 export interface ConnectorCredentialField {
   key: string;
   label: string;
-  type: "text" | "password";
+  type: "text" | "password" | "multiline";
 }
 
 export interface ConnectorCatalogEntry {
@@ -493,6 +496,42 @@ export const connectorCatalog = {
       "otpExpiresAt",
       "otp",
     ],
+  },
+  bitcoin: {
+    id: "bitcoin",
+    title: "比特幣錢包",
+    description: "鏈上 BTC 地址餘額與轉入轉出紀錄",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "investment_position",
+      "investment_transaction",
+      "net_worth_history",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "addresses", label: "BTC 地址（每行一個）", type: "multiline" },
+    ],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
+  },
+  ethereum: {
+    id: "ethereum",
+    title: "以太坊錢包",
+    description: "鏈上 ETH 地址餘額與轉入轉出紀錄",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "investment_position",
+      "investment_transaction",
+      "net_worth_history",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "addresses", label: "ETH 地址（每行一個）", type: "multiline" },
+    ],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
   },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 

@@ -47,6 +47,7 @@
     selectedTotal: { label: "淨資產", color: "#3e6f7c" },
     stock: { label: "股票/ETF", color: "#6574cd" },
     fund: { label: "基金", color: "#9b6bb0" },
+    crypto: { label: "加密貨幣", color: "#c9822b" },
     deposit: { label: "存款", color: "#3e6f7c" },
     manual: { label: "其他資產", color: "#b5853f" },
   };
@@ -115,7 +116,7 @@
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null");
       if (!Array.isArray(saved)) return;
       const valid = saved.filter((value): value is NetWorthAssetType =>
-        ["stock", "fund", "deposit", "manual"].includes(value),
+        ["stock", "fund", "crypto", "deposit", "manual"].includes(value),
       );
       if (valid.length) includedAssets = valid;
     } catch {

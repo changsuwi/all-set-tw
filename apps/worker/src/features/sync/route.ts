@@ -288,6 +288,14 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     return manualSyncResponse(c, "skbank");
   });
 
+  api.post("/connectors/bitcoin/sync", async (c) => {
+    return manualSyncResponse(c, "bitcoin");
+  });
+
+  api.post("/connectors/ethereum/sync", async (c) => {
+    return manualSyncResponse(c, "ethereum");
+  });
+
   api.post("/connectors/sinopac/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "sinopac"));

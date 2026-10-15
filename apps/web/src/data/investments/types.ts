@@ -2,7 +2,7 @@ import type { ConnectorId } from "@taiwan-fin-hub/shared";
 
 export interface InvestmentRow {
   id: string;
-  assetType: "stock" | "etf" | "fund";
+  assetType: "stock" | "etf" | "fund" | "crypto";
   symbol?: string;
   name: string;
   quantity?: number;
@@ -22,7 +22,7 @@ export interface InvestmentTransactionRow {
   brokerName?: string;
   symbol?: string;
   name?: string;
-  assetType?: "stock" | "etf" | "fund" | "bond" | "unknown";
+  assetType?: "stock" | "etf" | "fund" | "bond" | "crypto" | "unknown";
   tradeDate?: string;
   postedDate?: string;
   transactionCode?: string;

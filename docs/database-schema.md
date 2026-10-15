@@ -11,7 +11,7 @@
 - Tables：32
 - Explicit indexes：46
 - Other objects：0
-- Migrations：56
+- Migrations：58
 
 ## Tables
 
@@ -715,7 +715,7 @@ CREATE TABLE "exchange_rates" (
 | 1 | `id` | 持倉快照的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `connector_id` | 產生此持倉的外部連接器識別碼。 | TEXT | NO | — | — | — |
 | 3 | `source_id` | 外部來源系統提供的持倉識別碼。 | TEXT | NO | — | — | — |
-| 4 | `asset_type` | 資產類型，目前限制為 stock、etf 或 fund。 | TEXT | NO | — | — | — |
+| 4 | `asset_type` | 資產類型，目前限制為 stock、etf、fund 或 crypto（鏈上錢包）。 | TEXT | NO | — | — | — |
 | 5 | `symbol` | 證券、基金或 ETF 的代號。 | TEXT | YES | — | — | — |
 | 6 | `name` | 投資標的名稱。 | TEXT | NO | — | — | — |
 | 7 | `quantity` | 持有數量。 | REAL | YES | — | — | — |
@@ -747,7 +747,7 @@ CREATE TABLE "investment_positions" (
   id TEXT NOT NULL PRIMARY KEY,
   connector_id TEXT NOT NULL,
   source_id TEXT NOT NULL,
-  asset_type TEXT NOT NULL CHECK (asset_type IN ('stock', 'etf', 'fund')),
+  asset_type TEXT NOT NULL CHECK (asset_type IN ('stock', 'etf', 'fund', 'crypto')),
   symbol TEXT,
   name TEXT NOT NULL,
   quantity REAL,
@@ -780,7 +780,7 @@ CREATE TABLE "investment_positions" (
 | 7 | `broker_name` | 券商或交易機構名稱。 | TEXT | YES | — | — | — |
 | 8 | `symbol` | 交易標的代號。 | TEXT | YES | — | — | — |
 | 9 | `name` | 交易標的名稱。 | TEXT | YES | — | — | — |
-| 10 | `asset_type` | 資產類型，例如 stock、etf、fund、bond 或 unknown。 | TEXT | YES | — | — | — |
+| 10 | `asset_type` | 資產類型，例如 stock、etf、fund、bond、crypto 或 unknown。 | TEXT | YES | — | — | — |
 | 11 | `trade_date` | 交易發生日期。 | TEXT | YES | — | — | — |
 | 12 | `posted_date` | 交易正式入帳日期。 | TEXT | YES | — | — | — |
 | 13 | `transaction_code` | 外部系統的交易類型代碼。 | TEXT | YES | — | — | — |
@@ -819,7 +819,7 @@ CREATE TABLE "investment_transactions" (
   broker_name TEXT,
   symbol TEXT,
   name TEXT,
-  asset_type TEXT CHECK (asset_type IN ('stock', 'etf', 'fund', 'bond', 'unknown')),
+  asset_type TEXT CHECK (asset_type IN ('stock', 'etf', 'fund', 'bond', 'crypto', 'unknown')),
   trade_date TEXT,
   posted_date TEXT,
   transaction_code TEXT,
@@ -1086,8 +1086,8 @@ CREATE TABLE manual_sync_runs (
 | 1 | `id` | 歷史點的系統識別碼。 | TEXT | NO | — | 1 | — |
 | 2 | `date` | 此數值所代表的日期。 | TEXT | NO | — | — | — |
 | 3 | `net_worth` | 該日期與資產類型的金額；手動資產保留其設定幣別，其餘讀模型通常以 TWD 表示。 | INTEGER | NO | — | — | — |
-| 4 | `asset_type` | 資產類型，例如 total、deposit、stock、fund 或手動資產 id。 | TEXT | NO | 'total' | — | — |
-| 5 | `source` | 數值來源，例如 bank 或 manual。 | TEXT | NO | — | — | — |
+| 4 | `asset_type` | 資產類型，例如 total、deposit、stock、fund、crypto 或手動資產 id。 | TEXT | NO | 'total' | — | — |
+| 5 | `source` | 數值來源，例如 bank、manual 或產生此歷史的 connector id（如 tdcc、bitcoin）。 | TEXT | NO | — | — | — |
 | 6 | `snapshotted_at` | 此歷史點實際建立或重算的時間。 | TEXT | NO | — | — | — |
 
 #### Foreign keys
@@ -1759,6 +1759,8 @@ Migration 是 schema 演進的 source of truth；若要了解某欄位的變更�
 - [`0056_manual_sync_runs.sql`](../apps/worker/migrations/0056_manual_sync_runs.sql)
 - [`0057_sync_job_lock_phase.sql`](../apps/worker/migrations/0057_sync_job_lock_phase.sql)
 - [`0058_fubon_sync_job.sql`](../apps/worker/migrations/0058_fubon_sync_job.sql)
+- [`0059_crypto_asset_type.sql`](../apps/worker/migrations/0059_crypto_asset_type.sql)
+- [`0060_crypto_wallet_sync_jobs.sql`](../apps/worker/migrations/0060_crypto_wallet_sync_jobs.sql)
 
 ## 程式碼導覽
 

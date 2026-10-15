@@ -50,7 +50,7 @@ export const investmentPositions = sqliteTable(
     unique().on(table.connectorId, table.sourceId, table.asOfDate),
     check(
       "investment_positions_check_1",
-      sql`asset_type IN ('stock', 'etf', 'fund')`,
+      sql`asset_type IN ('stock', 'etf', 'fund', 'crypto')`,
     ),
   ],
 );
@@ -98,7 +98,7 @@ export const investmentTransactions = sqliteTable(
     unique().on(table.connectorId, table.accountId, table.sourceId),
     check(
       "investment_transactions_check_1",
-      sql`asset_type IN ('stock', 'etf', 'fund', 'bond', 'unknown')`,
+      sql`asset_type IN ('stock', 'etf', 'fund', 'bond', 'crypto', 'unknown')`,
     ),
   ],
 );

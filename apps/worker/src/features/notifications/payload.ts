@@ -34,6 +34,8 @@ const connectorLabels: Record<ConnectorId, string> = {
   megabank: "兆豐銀行",
   rakuten: "樂天國際銀行",
   fubon: "台北富邦銀行",
+  bitcoin: "比特幣錢包",
+  ethereum: "以太坊錢包",
 };
 
 export function syncNotificationPayload(
