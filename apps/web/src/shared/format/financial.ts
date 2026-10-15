@@ -29,6 +29,26 @@ export function formatNumber(value: number) {
   );
 }
 
+/** 持倉類型的顯示文字；加密貨幣以中文標示，其餘沿用代碼大寫。 */
+export function formatAssetType(assetType: string) {
+  return assetType === "crypto" ? "加密貨幣" : assetType.toUpperCase();
+}
+
+/** 持倉數量：加密貨幣保留 8 位小數並標示幣別，其餘以整數「單位」顯示。 */
+export function formatPositionQuantity(position: {
+  assetType: string;
+  quantity?: number;
+  symbol?: string;
+}) {
+  if (position.assetType === "crypto") {
+    const quantity = new Intl.NumberFormat("zh-TW", {
+      maximumFractionDigits: 8,
+    }).format(position.quantity ?? 0);
+    return `${quantity} ${position.symbol ?? ""}`.trim();
+  }
+  return `${formatNumber(position.quantity ?? 0)} 單位`;
+}
+
 export function formatCompactTwd(value: number) {
   if (moneyState.hidden) return "••••";
   const abs = Math.abs(value);

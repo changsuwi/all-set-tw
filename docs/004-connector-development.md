@@ -771,3 +771,13 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 ## 將來銀行
 
 使用網銀帳密，直接呼叫網銀內部 Web API 登入與查詢；圖形驗證碼支援 AI 自動辨識或人工輸入。單次登入、查詢後登出，不接管其他工作階段。主帳戶查詢最近三個月，活存口袋讀取所有分頁後依日期篩選；定存口袋同步餘額，基金與美股未接入。排程建立時停用，首次成功同步後自動啟用。設定 CAS 與原子寫入 guard 防止查詢期間變更帳密後仍寫入舊結果。
+
+## 鏈上錢包（比特幣、以太坊）
+
+- `bitcoin` 與 `ethereum` 是兩個獨立的 connector，各自有 sync job 與 Queue invocation；共用的純邏輯在 `sources/onchain-wallet.ts`（地址解析、分頁歷史掃描、請求額度、單位換算），同步協調在 `sources/onchain-wallet-sync.ts`，各鏈目錄只負責地址驗證、區塊鏈 API client 與單筆交易的淨變化計算。
+- 設定只有一個 `multiline` 欄位 `addresses`（每行一個地址，上限 20 個）。地址不是秘密，但會洩漏持倉，仍與帳密相同加密保存；儲存後不再顯示，重新填寫會整組取代並清除 cursor，下次同步重新掃描完整歷史。BTC 拒絕 xpub／ypub／zpub 並提示尚未支援。
+- 資料來源：BTC 使用 mempool.space（`/address/{address}` 已確認餘額、`/address/{address}/txs/chain` 每頁 25 筆）；ETH 使用 Blockscout v2（`coin_balance`、一般交易與內部交易）。兩者都不需要 API key。估值使用 MAX 公開行情 `btctwd`／`ethtwd` 的 `last`，報價取不到時整次同步失敗，不寫入市值為 0 的持倉。
+- 寫入：每個 connector 一筆 `investment_positions`（`asset_type = 'crypto'`、`source_id` 為幣別小寫、`market_value` 為台幣整數、`raw` 只含遮罩地址、各地址數量與報價）；每筆影響自有地址的交易一筆 `investment_transactions`（`source_id` 為 txid，ETH 內部交易為 `<hash>:internal:<index>`，數量轉出為負，`amount` 不填）；每天一筆 `net_worth_history`（`source` 為 connector id、`asset_type = 'crypto'`）。
+- 淨變化以整組自有地址計算並以 BigInt（satoshi／wei）運算：自有地址互轉只記手續費；BTC 找零回到自有地址不算轉出；ETH 失敗交易只扣 gas；Blockscout 內部交易 index 0 為最上層呼叫，略過以免與一般交易重複。
+- 免費方案每次呼叫最多 50 個對外請求，每次同步以 45 個為額度：報價 1 個，先查所有地址餘額，再由新到舊取得上次同步後的新交易，剩餘額度才接續首次同步未取完的舊歷史。`sync_cursor` 以地址 SHA-256 前 16 碼為鍵，記錄已處理的區塊高度與續取位置，不含地址本身。新交易若無法在額度內接上已處理高度，保留舊 cursor 下次重試，不留下缺口。
+- 只計已確認交易；未確認交易與 ERC-20 代幣不納入。

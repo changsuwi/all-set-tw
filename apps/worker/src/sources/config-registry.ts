@@ -16,6 +16,8 @@ import { rakutenConfigSchema } from "./rakuten/protocol";
 import { kgibankConfigSchema } from "./kgibank/protocol";
 import { megabankConfigSchema } from "./megabank/protocol";
 import { fubonConfigSchema } from "./fubon/protocol";
+import { bitcoinConfigSchema } from "./bitcoin/protocol";
+import { ethereumConfigSchema } from "./ethereum/protocol";
 
 export const connectorConfigSchemas = {
   einvoice: invoiceConfigSchema,
@@ -34,6 +36,8 @@ export const connectorConfigSchemas = {
   kgibank: kgibankConfigSchema,
   megabank: megabankConfigSchema,
   fubon: fubonConfigSchema,
+  bitcoin: bitcoinConfigSchema,
+  ethereum: ethereumConfigSchema,
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export function parseConnectorConfig(

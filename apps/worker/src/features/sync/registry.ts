@@ -58,6 +58,8 @@ import {
   syncNextbank,
   prepareNextbankCaptchaSession,
 } from "../../sources/nextbank/sync";
+import { syncBitcoin } from "../../sources/bitcoin/sync";
+import { syncEthereum } from "../../sources/ethereum/sync";
 import { SYNC_SCOPE_ALL, type SyncOutcome, type SyncScope } from "./types";
 
 type ConnectorRuntimeDefinition = {
@@ -151,6 +153,12 @@ export const connectorRuntimeRegistry: Record<
     run: (env, trigger, _scope, overrides) =>
       syncFubon(env, trigger, overrides as FubonSyncOverrides),
     prepareChallenge: prepareFubonCaptchaSession,
+  },
+  bitcoin: {
+    run: (env, trigger) => syncBitcoin(env, trigger),
+  },
+  ethereum: {
+    run: (env, trigger) => syncEthereum(env, trigger),
   },
 };
 

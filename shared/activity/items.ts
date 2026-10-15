@@ -38,6 +38,7 @@ export interface ActivityTrade {
   postedDate?: string | null;
   transactionName?: string | null;
   transactionCode?: string | null;
+  assetType?: string | null;
   quantity?: number | null;
   price?: number | null;
   amount?: number | null;
@@ -45,6 +46,22 @@ export interface ActivityTrade {
 }
 const formatNumber = (value: number) =>
   new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 0 }).format(value);
+const formatCryptoQuantity = (value: number) =>
+  new Intl.NumberFormat("zh-TW", {
+    maximumFractionDigits: 8,
+    signDisplay: "exceptZero",
+  }).format(value);
+
+/** 交易數量的顯示文字：證券以「股」計；加密貨幣保留 8 位小數並標示幣別與方向。 */
+export function formatTradeQuantity(
+  trade: Pick<ActivityTrade, "assetType" | "quantity" | "symbol">,
+) {
+  if (trade.quantity == null) return undefined;
+  if (trade.assetType === "crypto") {
+    return `${formatCryptoQuantity(trade.quantity)} ${trade.symbol ?? ""}`.trim();
+  }
+  return `${formatNumber(trade.quantity)} 股`;
+}
 function normalizeFinancialDate(value?: string) {
   if (!value) return "";
   const roc = value.match(/^0(\d{3})-(\d{2})-(\d{2})(.*)$/);
@@ -133,7 +150,7 @@ export function buildActivityItems(
     ...trades.map((t) => {
       const accountName = [
         t.transactionName ?? t.transactionCode,
-        t.quantity != null ? `${formatNumber(t.quantity)} 股` : undefined,
+        formatTradeQuantity(t),
       ]
         .filter(Boolean)
         .join(" · ");

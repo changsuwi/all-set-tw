@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { parseConnectorConfig } from "../../sources/config-registry";
 import { connectorCatalog, type ConnectorId } from "@taiwan-fin-hub/shared";
 import { clearConnectorCursor } from "../../db";
@@ -186,8 +187,13 @@ export async function updateConnectorSettings(
         mergedPublic[key] = parsedConfig[key];
       delete encryptedConfig[key];
     }
-  } catch {
-    throw new InvalidConnectorConfigError();
+  } catch (error) {
+    // 自訂驗證（例如錢包地址格式）的訊息可直接提示使用者；其他錯誤不外洩細節。
+    const issue =
+      error instanceof z.ZodError
+        ? error.issues.find(({ code }) => code === "custom")
+        : undefined;
+    throw new InvalidConnectorConfigError(issue?.message);
   }
 
   await saveConnectorSettings(env.DB, {

@@ -1,6 +1,7 @@
 import type { NetWorthHistoryRow } from "@/data/assets/types";
 
-export type NetWorthAssetType = "stock" | "fund" | "deposit" | "manual";
+export type NetWorthAssetType =
+  "stock" | "fund" | "crypto" | "deposit" | "manual";
 export type NetWorthDisplayMode = "sum" | "breakdown";
 export type NetWorthTimeframe = "1M" | "3M" | "6M" | "1Y" | "ALL";
 export type NetWorthComparisonPeriod = "day" | "week" | "month";
@@ -19,6 +20,7 @@ export interface NetWorthChartPoint {
   date: string;
   stock?: number;
   fund?: number;
+  crypto?: number;
   deposit?: number;
   manual?: number;
   selectedTotal: number;
@@ -41,6 +43,7 @@ export const NET_WORTH_ASSET_SERIES: Array<{
 }> = [
   { key: "stock", label: "股票/ETF", color: "#6574cd" },
   { key: "fund", label: "基金", color: "#9b6bb0" },
+  { key: "crypto", label: "加密貨幣", color: "#c9822b" },
   { key: "deposit", label: "存款", color: "#3e6f7c" },
   { key: "manual", label: "其他資產", color: "#b5853f" },
 ];
@@ -48,6 +51,7 @@ export const NET_WORTH_ASSET_SERIES: Array<{
 export const NET_WORTH_DEFAULT_ASSETS: NetWorthAssetType[] = [
   "stock",
   "fund",
+  "crypto",
   "deposit",
 ];
 
@@ -221,6 +225,7 @@ export function buildNetWorthChartData(
       date,
       stock: valuesByType.stock.get(date),
       fund: valuesByType.fund.get(date),
+      crypto: valuesByType.crypto.get(date),
       deposit: valuesByType.deposit.get(date),
       manual: valuesByType.manual.get(date),
       selectedTotal: 0,

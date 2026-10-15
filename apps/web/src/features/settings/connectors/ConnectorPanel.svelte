@@ -20,6 +20,7 @@
   import Card from "@/shared/ui/Card.svelte";
   import Button from "@/shared/ui/Button.svelte";
   import Input from "@/shared/ui/Input.svelte";
+  import Textarea from "@/shared/ui/Textarea.svelte";
   import Select from "@/shared/ui/Select.svelte";
   import TimePicker from "@/shared/ui/TimePicker.svelte";
   import {
@@ -1666,29 +1667,52 @@
                 </span>
               {/if}
             </span>
-            <Input
-              class={storedCredential && !hasReplacement
-                ? "bg-moss/[0.035] placeholder:text-ink/55"
-                : ""}
-              type={field.type}
-              name={`tfh-${connectorId}-${field.key}`}
-              autocomplete={field.type === "password" ? "new-password" : "off"}
-              autocapitalize="none"
-              spellcheck={false}
-              readonly={!focusedCredentialKeys[field.key]}
-              data-1p-ignore
-              data-lpignore="true"
-              data-form-type="other"
-              placeholder={storedCredential && !hasReplacement
-                ? "••••••••　已安全儲存"
-                : undefined}
-              value={String(values[field.key] ?? "")}
-              onfocus={() => (focusedCredentialKeys[field.key] = true)}
-              oninput={(e: Event) =>
-                (values[field.key] = (
-                  e.currentTarget as HTMLInputElement
-                ).value)}
-            />
+            {#if field.type === "multiline"}
+              <Textarea
+                class={`min-h-28 font-mono text-xs ${storedCredential && !hasReplacement ? "bg-moss/[0.035] placeholder:text-ink/55" : ""}`}
+                name={`tfh-${connectorId}-${field.key}`}
+                autocomplete="off"
+                autocapitalize="none"
+                spellcheck={false}
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
+                placeholder={storedCredential && !hasReplacement
+                  ? "已安全儲存；重新填寫會取代全部地址"
+                  : "每行一個地址"}
+                value={String(values[field.key] ?? "")}
+                oninput={(e: Event) =>
+                  (values[field.key] = (
+                    e.currentTarget as HTMLTextAreaElement
+                  ).value)}
+              />
+            {:else}
+              <Input
+                class={storedCredential && !hasReplacement
+                  ? "bg-moss/[0.035] placeholder:text-ink/55"
+                  : ""}
+                type={field.type}
+                name={`tfh-${connectorId}-${field.key}`}
+                autocomplete={field.type === "password"
+                  ? "new-password"
+                  : "off"}
+                autocapitalize="none"
+                spellcheck={false}
+                readonly={!focusedCredentialKeys[field.key]}
+                data-1p-ignore
+                data-lpignore="true"
+                data-form-type="other"
+                placeholder={storedCredential && !hasReplacement
+                  ? "••••••••　已安全儲存"
+                  : undefined}
+                value={String(values[field.key] ?? "")}
+                onfocus={() => (focusedCredentialKeys[field.key] = true)}
+                oninput={(e: Event) =>
+                  (values[field.key] = (
+                    e.currentTarget as HTMLInputElement
+                  ).value)}
+              />
+            {/if}
           </label>
         {/each}
       </div>
