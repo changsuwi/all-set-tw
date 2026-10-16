@@ -236,6 +236,8 @@ npm run dev
 
 台北富邦網銀拒絕 Browser Run 的對外連線，網銀請求改由 `FubonEgress` Durable Object 代發（migration tag `v2`）。設定方式與 `MegabankEgress` 相同：根目錄 `wrangler.toml` 與 `apps/worker/wrangler.local.toml.example` 已包含 binding 與 SQLite migration，既有私人 `wrangler.local.toml` 需自行補上 `FUBON_EGRESS` binding 與 `v2` migration。
 
+以太坊錢包同步預設使用 Blockscout 公開 API，未帶 API key 時依 IP 限流；Workers 共用 Cloudflare 出口 IP，常在第一個請求就收到 HTTP 429。可到 [Blockscout 開發者入口](https://dev.blockscout.com) 免費註冊並建立 API key（以 `proapi_` 開頭），在 Worker 的 **Settings → Runtime variables and secrets** 新增 Secret `BLOCKSCOUT_API_KEY`，或執行 `npx wrangler secret put BLOCKSCOUT_API_KEY`。設定後改用 PRO API，以 key 計算額度；免費方案為每秒 5 個請求、每日 100K credits。未設定時維持公開 API，並在 429 時依回應的重置時間短暫等待後重試。
+
 本機 `apps/worker/.dev.vars.example` 保留手動金鑰設定；請填入開發用隨機金鑰。若需解密正式資料，正式部署也必須在最初自行提供並保存相同金鑰；公開部署範例的 `auto` 只會由部署 script 初始化。
 
 SQL migrations 位於 `apps/worker/migrations/`。根目錄 `wrangler.toml` 的 `migrations_dir` 使用 `apps/worker/migrations`；`apps/worker/wrangler.local.toml` 使用相對於該設定檔的 `migrations`。若已建立私人 Wrangler 設定，請同步更新其 migration 路徑；既有 migration 檔名與內容維持原樣。

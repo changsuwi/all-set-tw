@@ -3,6 +3,7 @@ import {
   fetchWalletJson,
   WalletApiError,
   type HistoryPage,
+  type WalletRequestOptions,
 } from "../onchain-wallet";
 
 /** mempool.space 公開 Esplora API；不需要 API key。 */
@@ -44,7 +45,7 @@ const bitcoinTransactionSchema = z.object({
 
 export type BitcoinTransaction = z.infer<typeof bitcoinTransactionSchema>;
 
-type ClientOptions = { fetcher?: typeof fetch; signal?: AbortSignal };
+type ClientOptions = WalletRequestOptions;
 
 /** 已確認的地址餘額（satoshi）；未確認交易不計入。 */
 export async function fetchBitcoinBalance(

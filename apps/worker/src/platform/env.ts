@@ -19,6 +19,8 @@ export interface Env {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
+  /** 選填；設定後以太坊同步改用 Blockscout PRO API，以 key 計算限流額度。 */
+  BLOCKSCOUT_API_KEY?: string;
   TEAM_DOMAIN?: string;
   POLICY_AUD?: string;
   POLICY_AUDS?: string;

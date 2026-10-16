@@ -45,7 +45,10 @@ export type OnchainWalletSpec = {
   name: string;
   decimals: number;
   parseAddresses: (config: Record<string, unknown>) => string[];
-  fetchUsdPrice: (options: { signal?: AbortSignal }) => Promise<CryptoUsdQuote>;
+  fetchUsdPrice: (options: {
+    signal?: AbortSignal;
+    budget: RequestBudget;
+  }) => Promise<CryptoUsdQuote>;
   collect: (input: {
     addresses: string[];
     cursor: WalletCursor;
@@ -77,7 +80,13 @@ export async function syncOnchainWallet(
   );
   reportSyncProgress("fetching");
 
-  const quote = await spec.fetchUsdPrice({ signal });
+  // 匯率更新保留一個對外請求；報價與區塊鏈查詢（含 429 重試）共用其餘額度。
+  const budget = new RequestBudget(
+    EXTERNAL_REQUEST_BUDGET - 1,
+    REQUEST_PACE_MS,
+  );
+  await budget.take();
+  const quote = await spec.fetchUsdPrice({ signal, budget });
   const usdRate = await getRateToTwd(env.DB, "USD").catch(() => {
     signal?.throwIfAborted();
     throw new CryptoPriceUnavailableError(
@@ -85,11 +94,6 @@ export async function syncOnchainWallet(
     );
   });
   const price = cryptoTwdPrice(quote, usdRate);
-  // 報價與可能的匯率更新各占一個對外請求。
-  const budget = new RequestBudget(
-    EXTERNAL_REQUEST_BUDGET - 2,
-    REQUEST_PACE_MS,
-  );
   const collection = await spec.collect({
     addresses,
     cursor: parseWalletCursor(settings.sync_cursor),
