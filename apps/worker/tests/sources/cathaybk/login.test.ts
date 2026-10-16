@@ -10,8 +10,15 @@ describe("國泰登入公告", () => {
         evaluate: vi.fn().mockResolvedValue(label),
       }));
       let current = 0;
+      let settled = false;
       const page = {
-        $: vi.fn(async () => buttons[current++] ?? null),
+        $: vi.fn(async () => {
+          if (!settled) throw new Error("公告尚未開啟完成");
+          return buttons[current++] ?? null;
+        }),
+        waitForFunction: vi.fn(async () => {
+          settled = true;
+        }),
         waitForSelector: vi.fn(async () => {
           if (current !== buttons.length) throw new Error("公告尚未讀完");
         }),
@@ -38,6 +45,7 @@ describe("國泰登入公告", () => {
       };
       const page = {
         $: vi.fn().mockResolvedValue(button),
+        waitForFunction: vi.fn().mockResolvedValue(undefined),
         waitForSelector: vi.fn().mockResolvedValue(undefined),
       };
       await expect(dismissCathaySystemMessageIfPresent(page)).rejects.toThrow(
