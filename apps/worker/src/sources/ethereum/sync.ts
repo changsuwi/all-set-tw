@@ -32,8 +32,10 @@ export function syncEthereum(env: Env, trigger: SyncTrigger) {
     decimals: 18,
     parseAddresses: (config) =>
       parseEthereumAddresses(parseEthereumConfig(config).addresses),
-    fetchUsdPrice: fetchEthereumUsdPrice,
-    collect: collectEthereumWallet,
+    fetchUsdPrice: (options) =>
+      fetchEthereumUsdPrice({ ...options, apiKey: env.BLOCKSCOUT_API_KEY }),
+    collect: (input) =>
+      collectEthereumWallet({ ...input, apiKey: env.BLOCKSCOUT_API_KEY }),
   });
 }
 
@@ -51,14 +53,16 @@ export async function collectEthereumWallet({
   budget,
   signal,
   fetcher,
+  apiKey,
 }: {
   addresses: string[];
   cursor: WalletCursor;
   budget: RequestBudget;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
+  apiKey?: string;
 }): Promise<WalletCollection> {
-  const options = { signal, fetcher };
+  const options = { signal, fetcher, budget, apiKey };
   const ownAddresses = new Set(addresses);
   const keys = await Promise.all(addresses.map(addressKey));
   const lists: HistoryList[] = [

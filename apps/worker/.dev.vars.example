@@ -9,3 +9,5 @@ LOCAL_DEV_MODE=true
 # VAPID_PRIVATE_KEY=replace-with-web-push-private-key
 # Optional; defaults to mailto:admin@example.com
 # VAPID_SUBJECT=mailto:admin@example.com
+# Optional; Blockscout PRO API key (proapi_...) for Ethereum wallet sync.
+# BLOCKSCOUT_API_KEY=replace-with-blockscout-api-key

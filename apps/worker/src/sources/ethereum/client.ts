@@ -3,10 +3,16 @@ import {
   fetchWalletJson,
   WalletApiError,
   type HistoryPage,
+  type WalletRequestOptions,
 } from "../onchain-wallet";
 
-/** Blockscout 公開 API；不需要 API key，同時提供餘額、一般交易與內部交易。 */
+/**
+ * Blockscout 公開 API，同時提供餘額、一般交易與內部交易。未設定 API key 時
+ * 依 IP 限流，Workers 共用出口 IP 容易被擋；設定後改用 PRO API，以 key 計算額度。
+ */
 export const BLOCKSCOUT_API_URL = "https://eth.blockscout.com/api/v2";
+/** PRO API 路徑中的 `1` 是 Ethereum mainnet 的 chain id。 */
+export const BLOCKSCOUT_PRO_API_URL = "https://api.blockscout.com/1/api/v2";
 
 const LABEL = "以太坊區塊鏈查詢服務（Blockscout）";
 
@@ -51,7 +57,15 @@ export type EthereumInternalTransaction = z.infer<
   typeof ethereumInternalTransactionSchema
 >;
 
-type ClientOptions = { fetcher?: typeof fetch; signal?: AbortSignal };
+type ClientOptions = WalletRequestOptions & { apiKey?: string };
+
+function blockscoutUrl(path: string, apiKey: string | undefined) {
+  const url = new URL(
+    `${apiKey ? BLOCKSCOUT_PRO_API_URL : BLOCKSCOUT_API_URL}${path}`,
+  );
+  if (apiKey) url.searchParams.set("apikey", apiKey);
+  return url;
+}
 
 /** 地址目前的 ETH 餘額（wei）。 */
 export async function fetchEthereumBalance(
@@ -59,7 +73,10 @@ export async function fetchEthereumBalance(
   options: ClientOptions = {},
 ) {
   const payload = await fetchWalletJson(
-    `${BLOCKSCOUT_API_URL}/addresses/${encodeURIComponent(address)}`,
+    blockscoutUrl(
+      `/addresses/${encodeURIComponent(address)}`,
+      options.apiKey,
+    ).toString(),
     { ...options, label: LABEL },
   );
   const parsed = addressSchema.safeParse(payload);
@@ -104,8 +121,9 @@ async function fetchPage<T extends z.ZodType>(
   next: string | null,
   options: ClientOptions,
 ): Promise<HistoryPage<z.infer<T>>> {
-  const url = new URL(
-    `${BLOCKSCOUT_API_URL}/addresses/${encodeURIComponent(address)}/${list}`,
+  const url = blockscoutUrl(
+    `/addresses/${encodeURIComponent(address)}/${list}`,
+    options.apiKey,
   );
   if (next) {
     for (const [key, value] of Object.entries(
@@ -148,10 +166,10 @@ const statsSchema = z.object({
 
 /** Blockscout 的 ETH 美元報價；與地址查詢同一服務，避免另外依賴交易所 API。 */
 export async function fetchEthereumUsdPrice(options: ClientOptions = {}) {
-  const payload = await fetchWalletJson(`${BLOCKSCOUT_API_URL}/stats`, {
-    ...options,
-    label: LABEL,
-  });
+  const payload = await fetchWalletJson(
+    blockscoutUrl("/stats", options.apiKey).toString(),
+    { ...options, label: LABEL },
+  );
   const parsed = statsSchema.safeParse(payload);
   const priceUsd = Number(parsed.data?.coin_price);
   if (!parsed.success || !Number.isFinite(priceUsd) || priceUsd <= 0) {

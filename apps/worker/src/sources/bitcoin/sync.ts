@@ -47,7 +47,7 @@ export async function collectBitcoinWallet({
   signal?: AbortSignal;
   fetcher?: typeof fetch;
 }): Promise<WalletCollection> {
-  const options = { signal, fetcher };
+  const options = { signal, fetcher, budget };
   const ownAddresses = new Set(addresses);
   const keys = await Promise.all(addresses.map(addressKey));
   const states = keys.map(

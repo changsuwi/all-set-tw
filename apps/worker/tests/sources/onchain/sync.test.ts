@@ -253,6 +253,49 @@ describe("ethereum wallet sync", () => {
   });
 });
 
+describe("ethereum wallet sync with a Blockscout API key", () => {
+  it("uses the PRO API and retries after a rate-limited response", async () => {
+    await configure("ethereum", ME);
+    await env.DB.prepare(
+      "INSERT INTO exchange_rates(currency, rate_to_twd, updated_at) VALUES('USD', ?, ?)",
+    )
+      .bind(USD_RATE_TO_TWD, NOW)
+      .run();
+    env = { ...env, BLOCKSCOUT_API_KEY: "proapi_synthetic" } as Env;
+    let statsCalls = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.hostname !== "api.blockscout.com") {
+        return json({ error: "unexpected" }, 404);
+      }
+      expect(url.searchParams.get("apikey")).toBe("proapi_synthetic");
+      if (url.pathname === "/1/api/v2/stats") {
+        statsCalls += 1;
+        return statsCalls === 1
+          ? new Response("rate limited", {
+              status: 429,
+              headers: { "x-ratelimit-reset": "10" },
+            })
+          : json({ coin_price: "2500.00" });
+      }
+      if (url.pathname === `/1/api/v2/addresses/${ME}`) {
+        return json({ coin_balance: "1000000000000000000" });
+      }
+      return json({ items: [], next_page_params: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await syncEthereum(env, "manual");
+
+    expect(statsCalls).toBe(2);
+    expect(
+      await rows(
+        "SELECT quantity, market_value FROM investment_positions WHERE connector_id = 'ethereum'",
+      ),
+    ).toEqual([{ quantity: 1, market_value: 80_000 }]);
+  });
+});
+
 describe("crypto asset type migration", () => {
   it("keeps existing investment rows when rebuilding the tables", async () => {
     const migrations = readMigrations();

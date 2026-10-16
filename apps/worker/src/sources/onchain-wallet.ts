@@ -267,27 +267,52 @@ export async function scanBackfillHistory<T>(
 }
 
 /** 帶逾時、取消與 429／5xx 錯誤轉換的 JSON GET。 */
+/** 429 時最多重試的次數；每次重試都要從請求額度扣除。 */
+const RATE_LIMIT_RETRIES = 2;
+const RATE_LIMIT_DEFAULT_WAIT_MS = 1_000;
+const RATE_LIMIT_MAX_WAIT_MS = 3_000;
+
+export type WalletRequestOptions = {
+  fetcher?: typeof fetch;
+  signal?: AbortSignal;
+  /** 有額度時，遇到 429 會依回應的重置時間等待後重試。 */
+  budget?: RequestBudget;
+};
+
+/**
+ * 公開區塊鏈 API 依 IP 以秒為單位限流；Workers 共用 Cloudflare 出口 IP，
+ * 容易被其他流量用完額度，短暫等待後通常即可成功。
+ */
+function rateLimitWaitMs(response: Response) {
+  const resetMs = Number(response.headers.get("x-ratelimit-reset"));
+  const retryAfterMs = Number(response.headers.get("retry-after")) * 1000;
+  const wait = [resetMs, retryAfterMs].find(
+    (value) => Number.isFinite(value) && value > 0,
+  );
+  return Math.min(wait ?? RATE_LIMIT_DEFAULT_WAIT_MS, RATE_LIMIT_MAX_WAIT_MS);
+}
+
 export async function fetchWalletJson(
   url: string,
-  options: { label: string; fetcher?: typeof fetch; signal?: AbortSignal },
+  options: WalletRequestOptions & { label: string },
 ): Promise<unknown> {
-  const fetcher = options.fetcher ?? fetch;
-  const timeout = AbortSignal.timeout(15_000);
-  const signal = options.signal
-    ? AbortSignal.any([options.signal, timeout])
-    : timeout;
-  let response: Response;
-  try {
-    response = await fetcher(url, {
-      headers: { Accept: "application/json" },
-      signal,
-    });
-  } catch {
-    options.signal?.throwIfAborted();
-    throw new WalletApiError(
-      `${options.label}暫時無法連線，請稍後再試。`,
-      true,
+  let response = await requestWalletJson(url, options);
+  for (
+    let attempt = 0;
+    response.status === 429 &&
+    attempt < RATE_LIMIT_RETRIES &&
+    options.budget &&
+    (await options.budget.take());
+    attempt += 1
+  ) {
+    const waitMs = rateLimitWaitMs(response);
+    console.warn(
+      `[sync] ${options.label} rate limited; retrying in ${waitMs}ms`,
     );
+    await response.body?.cancel();
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+    options.signal?.throwIfAborted();
+    response = await requestWalletJson(url, options);
   }
   if (response.status === 429) {
     throw new WalletApiError(
@@ -305,5 +330,28 @@ export async function fetchWalletJson(
     return await response.json();
   } catch {
     throw new WalletApiError(`${options.label}回應格式無法辨識。`);
+  }
+}
+
+async function requestWalletJson(
+  url: string,
+  options: WalletRequestOptions & { label: string },
+) {
+  const fetcher = options.fetcher ?? fetch;
+  const timeout = AbortSignal.timeout(15_000);
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeout])
+    : timeout;
+  try {
+    return await fetcher(url, {
+      headers: { Accept: "application/json" },
+      signal,
+    });
+  } catch {
+    options.signal?.throwIfAborted();
+    throw new WalletApiError(
+      `${options.label}暫時無法連線，請稍後再試。`,
+      true,
+    );
   }
 }
