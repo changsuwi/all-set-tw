@@ -986,9 +986,37 @@ async function dismissInterstitialIfPresent(
   return hasWarning as boolean;
 }
 
+// The bank opens its notice list from jQuery ready with a Bootstrap fade and
+// ignores the close click while the fade is running, so wait until the modal
+// has finished opening, or is not going to open, before reading it.
+async function waitForCathaySystemMessageSettled(
+  page: Pick<CathayLoginPage, "waitForFunction">,
+) {
+  await page.waitForFunction(
+    () => {
+      const pageWindow = window as typeof window & {
+        LoginMsgList?: unknown;
+        jQuery?: (selector: string) => {
+          data: (key: string) => { _isTransitioning?: boolean } | undefined;
+        };
+      };
+      const notices = pageWindow.LoginMsgList;
+      if (!Array.isArray(notices) || notices.length === 0) return true;
+      if (!pageWindow.jQuery) return true;
+      if (document.querySelector("#divReloginConfirm.show")) return true;
+      const modal = pageWindow
+        .jQuery("#divSystemLoginMsgList")
+        .data("bs.modal");
+      return modal !== undefined && modal._isTransitioning !== true;
+    },
+    { timeout: 15_000 },
+  );
+}
+
 export async function dismissCathaySystemMessageIfPresent(
-  page: Pick<CathayLoginPage, "$" | "waitForSelector">,
+  page: Pick<CathayLoginPage, "$" | "waitForFunction" | "waitForSelector">,
 ): Promise<boolean> {
+  await waitForCathaySystemMessageSettled(page);
   const selector = "#divSystemLoginMsgList.show button.btn-fill";
   let dismissButton = await page.$(selector);
   if (!dismissButton) return false;
