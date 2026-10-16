@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { appendCathayDepositTransactions } from "../../../src/sources/cathaybk/connector";
+import { JSDOM } from "jsdom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  appendCathayDepositTransactions,
+  dismissCathayAnnouncementsIfPresent,
+} from "../../../src/sources/cathaybk/connector";
 import {
   assertCathayDepositQuery,
   parseCathayDepositTransactions,
@@ -194,5 +198,68 @@ describe("國泰存款同步核心保障", () => {
         content: { isGetDemandAccountSuccess: false, demandAccounts: [] },
       }),
     ).toThrow("國泰世華外幣活存查詢失敗，未更新資料。");
+  });
+});
+
+// 公告結構依 2026-10-16 交易頁實際出現的 Chakra 公告；內容為合成文字。
+describe("國泰網銀公告", () => {
+  function announcementPage(html: string) {
+    const dom = new JSDOM(html);
+    const clicked: string[] = [];
+    vi.stubGlobal("document", dom.window.document);
+    const page = {
+      evaluate: vi.fn(async (callback: () => unknown) => callback()),
+      click: vi.fn(async (selector: string) => {
+        const button = dom.window.document.querySelector(selector);
+        clicked.push((button?.textContent ?? "").trim());
+        button?.closest(".chakra-modal__content")?.remove();
+      }),
+      waitForFunction: vi.fn(
+        async (
+          callback: (selector: string) => unknown,
+          _options: unknown,
+          selector: string,
+        ) => {
+          if (!callback(selector)) throw new Error("公告未關閉");
+        },
+      ),
+    };
+    return {
+      clicked,
+      dom,
+      page: page as typeof page &
+        Parameters<typeof dismissCathayAnnouncementsIfPresent>[0],
+    };
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("只按「下次再提醒」關閉公告，不變更公告設定", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const { clicked, dom, page } = announcementPage(`
+      <section class="chakra-modal__content">系統維護公告
+        <button>不要再顯示</button><button>下次再提醒</button>
+      </section>
+      <section class="chakra-modal__content">系統維護公告
+        <button>不要再顯示</button><button> 下次再提醒 </button>
+      </section>`);
+
+    await expect(dismissCathayAnnouncementsIfPresent(page)).resolves.toBe(true);
+
+    expect(clicked).toEqual(["下次再提醒", "下次再提醒"]);
+    expect(
+      dom.window.document.querySelectorAll(".chakra-modal__content"),
+    ).toHaveLength(0);
+  });
+
+  it("沒有公告時不點擊任何按鈕", async () => {
+    const { page } = announcementPage(
+      `<section class="chakra-modal__content"><button>確定</button></section>`,
+    );
+
+    await expect(dismissCathayAnnouncementsIfPresent(page)).resolves.toBe(
+      false,
+    );
+    expect(page.click).not.toHaveBeenCalled();
   });
 });

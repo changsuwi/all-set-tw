@@ -1285,6 +1285,44 @@ function periodLabel(days: number): string {
 
 type CathayCombobox = "account" | "period";
 
+const CATHAY_ANNOUNCEMENT_DISMISS = '[data-cathay-announcement-dismiss="true"]';
+
+/**
+ * 網銀頁面的 Chakra 公告會鎖住鍵盤焦點，使選單收不到 ArrowDown。
+ * 只點「下次再提醒」關閉，不點「不要再顯示」以免變更使用者的公告設定。
+ */
+export async function dismissCathayAnnouncementsIfPresent(
+  page: Pick<Page, "click" | "evaluate" | "waitForFunction">,
+): Promise<boolean> {
+  let dismissed = false;
+  // ponytail: cap at 5 announcements; fail closed if the bank keeps reopening them.
+  for (let count = 0; count < 5; count++) {
+    const found = await page.evaluate(() => {
+      const button = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".chakra-modal__content button, [aria-modal='true'] button",
+        ),
+      ).find(
+        (element) =>
+          (element.textContent ?? "").replace(/\s+/g, "") === "下次再提醒",
+      );
+      if (button) button.dataset.cathayAnnouncementDismiss = "true";
+      return Boolean(button);
+    });
+    if (!found) return dismissed;
+
+    console.log("[cathaybk] dismissing announcement dialog");
+    await page.click(CATHAY_ANNOUNCEMENT_DISMISS);
+    await page.waitForFunction(
+      (selector: string) => !document.querySelector(selector),
+      { timeout: 5000 },
+      CATHAY_ANNOUNCEMENT_DISMISS,
+    );
+    dismissed = true;
+  }
+  throw new Error("Cathay announcement dialogs exceeded 5 notices.");
+}
+
 async function chooseCathayComboboxOption(
   page: Page,
   kind: CathayCombobox,
@@ -1319,13 +1357,24 @@ async function chooseCathayComboboxOption(
     throw new Error("國泰世華交易頁面找不到帳號或期間選單，未更新資料。");
   }
 
-  await page.focus(`[data-cathay-combobox="${kind}"]`);
-  await page.keyboard.press("ArrowDown");
-  await page.waitForFunction(
-    () =>
-      document.querySelectorAll("[role='option'], [id*='-option-']").length > 0,
-    { timeout: 5000 },
-  );
+  const openMenu = async () => {
+    await page.focus(`[data-cathay-combobox="${kind}"]`);
+    await page.keyboard.press("ArrowDown");
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll("[role='option'], [id*='-option-']").length >
+        0,
+      { timeout: 5000 },
+    );
+  };
+  await dismissCathayAnnouncementsIfPresent(page);
+  try {
+    await openMenu();
+  } catch (error) {
+    // The announcement can open after the page settles; retry once after closing it.
+    if (!(await dismissCathayAnnouncementsIfPresent(page))) throw error;
+    await openMenu();
+  }
   const selected = await page.evaluate(
     (target: CathayCombobox, match: string) => {
       const option = Array.from(
