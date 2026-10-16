@@ -1,27 +1,19 @@
-import { z } from "zod";
-
 /**
- * 加密貨幣的新台幣報價。使用 MAX 交易所的公開行情：直接以 TWD 報價、
- * 不需要 API key，也沒有地區封鎖。每次只發出一個請求。
+ * 加密貨幣的新台幣估值。報價取自各鏈同步本來就使用的區塊鏈服務（美元計價），
+ * 再以資產頁共用的美元匯率換算；台灣交易所的公開行情會拒絕來自 Cloudflare
+ * Workers 的請求，因此不直接使用。
  */
-export const MAX_TICKERS_URL = "https://max-api.maicoin.com/api/v3/tickers";
-
-const PRICE_TIMEOUT_MS = 10_000;
-
-const tickersSchema = z.array(
-  z.object({
-    market: z.string(),
-    at: z.number(),
-    last: z.string(),
-  }),
-);
-
-export type CryptoTwdPrice = {
-  symbol: string;
-  priceTwd: number;
+export type CryptoUsdQuote = {
+  priceUsd: number;
   /** 報價時間（ISO）。 */
   at: string;
-  source: "max";
+  source: string;
+};
+
+export type CryptoTwdPrice = CryptoUsdQuote & {
+  priceTwd: number;
+  usdRateToTwd: number;
+  usdRateUpdatedAt: string;
 };
 
 export class CryptoPriceUnavailableError extends Error {
@@ -31,59 +23,18 @@ export class CryptoPriceUnavailableError extends Error {
   }
 }
 
-export async function fetchCryptoTwdPrices(
-  symbols: readonly string[],
-  options: { fetcher?: typeof fetch; signal?: AbortSignal } = {},
-): Promise<Record<string, CryptoTwdPrice>> {
-  const fetcher = options.fetcher ?? fetch;
-  const url = new URL(MAX_TICKERS_URL);
-  for (const symbol of symbols) {
-    url.searchParams.append("markets[]", `${symbol.toLowerCase()}twd`);
+export function cryptoTwdPrice(
+  quote: CryptoUsdQuote,
+  usdRate: { rateTwd: number; updatedAt: string },
+): CryptoTwdPrice {
+  const priceTwd = quote.priceUsd * usdRate.rateTwd;
+  if (!Number.isFinite(priceTwd) || priceTwd <= 0) {
+    throw new CryptoPriceUnavailableError("加密貨幣新台幣估值無法計算。");
   }
-  const signal = options.signal
-    ? AbortSignal.any([options.signal, AbortSignal.timeout(PRICE_TIMEOUT_MS)])
-    : AbortSignal.timeout(PRICE_TIMEOUT_MS);
-
-  let payload: unknown;
-  try {
-    const response = await fetcher(url, {
-      headers: { Accept: "application/json" },
-      signal,
-    });
-    if (!response.ok) {
-      throw new CryptoPriceUnavailableError(
-        `加密貨幣報價來源回應 HTTP ${response.status}，請稍後再試。`,
-      );
-    }
-    payload = await response.json();
-  } catch (error) {
-    options.signal?.throwIfAborted();
-    if (error instanceof CryptoPriceUnavailableError) throw error;
-    throw new CryptoPriceUnavailableError();
-  }
-
-  const parsed = tickersSchema.safeParse(payload);
-  if (!parsed.success) {
-    throw new CryptoPriceUnavailableError("加密貨幣報價格式無法辨識。");
-  }
-
-  const prices: Record<string, CryptoTwdPrice> = {};
-  for (const symbol of symbols) {
-    const ticker = parsed.data.find(
-      ({ market }) => market === `${symbol.toLowerCase()}twd`,
-    );
-    const priceTwd = Number(ticker?.last);
-    if (!ticker || !Number.isFinite(priceTwd) || priceTwd <= 0) {
-      throw new CryptoPriceUnavailableError(
-        `無法取得 ${symbol} 的新台幣報價。`,
-      );
-    }
-    prices[symbol] = {
-      symbol,
-      priceTwd,
-      at: new Date(ticker.at * 1000).toISOString(),
-      source: "max",
-    };
-  }
-  return prices;
+  return {
+    ...quote,
+    priceTwd,
+    usdRateToTwd: usdRate.rateTwd,
+    usdRateUpdatedAt: usdRate.updatedAt,
+  };
 }

@@ -25,20 +25,8 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function maxTickers(url: URL) {
-  const markets = url.searchParams.getAll("markets[]");
-  const prices: Record<string, string> = {
-    btctwd: "2000000.0",
-    ethtwd: "80000.0",
-  };
-  return json(
-    markets.map((market) => ({
-      market,
-      at: 1_792_000_000,
-      last: prices[market],
-    })),
-  );
-}
+// 1 USD = 32 TWD：BTC 62,500 USD = 2,000,000 TWD；ETH 2,500 USD = 80,000 TWD。
+const USD_RATE_TO_TWD = 32;
 
 async function configure(
   connectorId: "bitcoin" | "ethereum",
@@ -104,9 +92,16 @@ describe("bitcoin wallet sync", () => {
 
   it("writes the TWD position, transfers and net worth without duplicating on resync", async () => {
     await configure("bitcoin", `${COLD}\n`);
+    await env.DB.prepare(
+      "INSERT INTO exchange_rates(currency, rate_to_twd, updated_at) VALUES('USD', ?, ?)",
+    )
+      .bind(USD_RATE_TO_TWD, NOW)
+      .run();
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
-      if (url.hostname === "max-api.maicoin.com") return maxTickers(url);
+      if (url.pathname === "/api/v1/prices") {
+        return json({ time: 1_792_000_000, USD: 62_500 });
+      }
       if (url.pathname.endsWith("/txs/chain")) return json(history);
       if (url.pathname === `/api/address/${COLD}`) {
         return json({
@@ -186,13 +181,24 @@ describe("bitcoin wallet sync", () => {
 });
 
 describe("ethereum wallet sync", () => {
-  it("values the wallet in TWD and records gas on outgoing transfers", async () => {
+  it("values the wallet in TWD via the USD rate and records gas on outgoing transfers", async () => {
     await configure("ethereum", ME.toUpperCase().replace("0X", "0x"));
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = new URL(String(input));
-        if (url.hostname === "max-api.maicoin.com") return maxTickers(url);
+        // 尚未保存匯率時，同步會先向匯率來源更新。
+        if (url.hostname === "open.er-api.com") {
+          return json({
+            result: "success",
+            base_code: "TWD",
+            time_last_update_unix: 1_792_000_000,
+            rates: { USD: 1 / USD_RATE_TO_TWD, JPY: 4.7, EUR: 0.027 },
+          });
+        }
+        if (url.pathname === "/api/v2/stats") {
+          return json({ coin_price: "2500.00" });
+        }
         if (url.pathname === `/api/v2/addresses/${ME}`) {
           return json({ coin_balance: "1250000000000000000" });
         }

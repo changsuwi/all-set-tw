@@ -15,6 +15,7 @@ import { syncOnchainWallet } from "../onchain-wallet-sync";
 import {
   fetchBitcoinBalance,
   fetchBitcoinTransactionPage,
+  fetchBitcoinUsdPrice,
   type BitcoinTransaction,
 } from "./client";
 import { parseBitcoinAddresses, parseBitcoinConfig } from "./protocol";
@@ -28,6 +29,7 @@ export function syncBitcoin(env: Env, trigger: SyncTrigger) {
     decimals: 8,
     parseAddresses: (config) =>
       parseBitcoinAddresses(parseBitcoinConfig(config).addresses),
+    fetchUsdPrice: fetchBitcoinUsdPrice,
     collect: collectBitcoinWallet,
   });
 }

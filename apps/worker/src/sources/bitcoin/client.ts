@@ -88,3 +88,23 @@ export async function fetchBitcoinTransactionPage(
         : null,
   };
 }
+
+const usdPriceSchema = z.object({
+  time: z.number().int().positive(),
+  USD: z.number().positive(),
+});
+
+/** mempool.space 的 BTC 美元報價；與地址查詢同一服務，避免另外依賴交易所 API。 */
+export async function fetchBitcoinUsdPrice(options: ClientOptions = {}) {
+  const payload = await fetchWalletJson(`${MEMPOOL_API_URL}/v1/prices`, {
+    ...options,
+    label: LABEL,
+  });
+  const parsed = usdPriceSchema.safeParse(payload);
+  if (!parsed.success) throw new WalletApiError(`${LABEL}報價格式無法辨識。`);
+  return {
+    priceUsd: parsed.data.USD,
+    at: new Date(parsed.data.time * 1000).toISOString(),
+    source: "mempool.space",
+  };
+}

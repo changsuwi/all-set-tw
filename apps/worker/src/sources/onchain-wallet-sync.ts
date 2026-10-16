@@ -13,7 +13,12 @@ import {
   netWorthHistoryRecord,
 } from "../features/sync/record-mapper";
 import type { SyncOutcome } from "../features/sync/types";
-import { fetchCryptoTwdPrices } from "./crypto-price";
+import { getRateToTwd } from "../features/exchange-rates/service";
+import {
+  CryptoPriceUnavailableError,
+  cryptoTwdPrice,
+  type CryptoUsdQuote,
+} from "./crypto-price";
 import {
   EXTERNAL_REQUEST_BUDGET,
   maskAddress,
@@ -31,8 +36,8 @@ import { reportSyncProgress } from "./sync-progress";
 
 /**
  * BTC／ETH 鏈上錢包共用的同步協調：讀取地址設定、在固定的對外請求額度內
- * 取得餘額與交易歷史、以 MAX 台幣報價估值，最後寫入投資持倉、交易與淨值歷史。
- * 各鏈只負責地址驗證、區塊鏈 API 與單筆交易的淨變化計算。
+ * 取得餘額與交易歷史、以美元報價乘上美元匯率估值，最後寫入投資持倉、交易與
+ * 淨值歷史。各鏈只負責地址驗證、區塊鏈 API（含美元報價）與單筆交易的淨變化計算。
  */
 export type OnchainWalletSpec = {
   connectorId: OnchainConnectorId;
@@ -40,6 +45,7 @@ export type OnchainWalletSpec = {
   name: string;
   decimals: number;
   parseAddresses: (config: Record<string, unknown>) => string[];
+  fetchUsdPrice: (options: { signal?: AbortSignal }) => Promise<CryptoUsdQuote>;
   collect: (input: {
     addresses: string[];
     cursor: WalletCursor;
@@ -71,10 +77,17 @@ export async function syncOnchainWallet(
   );
   reportSyncProgress("fetching");
 
-  const prices = await fetchCryptoTwdPrices([symbol], { signal });
-  const price = prices[symbol]!;
+  const quote = await spec.fetchUsdPrice({ signal });
+  const usdRate = await getRateToTwd(env.DB, "USD").catch(() => {
+    signal?.throwIfAborted();
+    throw new CryptoPriceUnavailableError(
+      "美元匯率暫時無法取得，無法換算加密貨幣的新台幣價值，請稍後再試。",
+    );
+  });
+  const price = cryptoTwdPrice(quote, usdRate);
+  // 報價與可能的匯率更新各占一個對外請求。
   const budget = new RequestBudget(
-    EXTERNAL_REQUEST_BUDGET - 1,
+    EXTERNAL_REQUEST_BUDGET - 2,
     REQUEST_PACE_MS,
   );
   const collection = await spec.collect({
@@ -108,6 +121,9 @@ export async function syncOnchainWallet(
         asOfDate,
         raw: {
           priceTwd: price.priceTwd,
+          priceUsd: price.priceUsd,
+          usdRateToTwd: price.usdRateToTwd,
+          usdRateUpdatedAt: price.usdRateUpdatedAt,
           priceAt: price.at,
           priceSource: price.source,
           addresses: collection.balances.map((balance) => ({

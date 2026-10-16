@@ -114,3 +114,39 @@ async function fetchProviderRates(fetcher: typeof fetch) {
     clearTimeout(timeout);
   }
 }
+
+/** 匯率來源每日更新一次；超過這個時間才重新查詢。 */
+const STORED_RATE_MAX_AGE_MS = 36 * 60 * 60 * 1000;
+
+/**
+ * 取得單一幣別換算新台幣的匯率，與資產頁使用同一份資料。已保存的匯率過舊或
+ * 不存在時才向匯率來源更新；更新失敗但仍有舊匯率時沿用舊值。
+ */
+export async function getRateToTwd(
+  db: D1Database,
+  currency: string,
+  options: { fetcher?: typeof fetch; now?: Date } = {},
+) {
+  const now = options.now ?? new Date();
+  const stored = (await listExchangeRates(db)).find(
+    (rate) => rate.currency === currency,
+  );
+  if (
+    stored &&
+    now.getTime() - Date.parse(stored.updatedAt) <= STORED_RATE_MAX_AGE_MS
+  ) {
+    return stored;
+  }
+  try {
+    const refreshed = (await refreshExchangeRates(db, options.fetcher)).find(
+      (rate) => rate.currency === currency,
+    );
+    if (refreshed) return refreshed;
+  } catch (error) {
+    if (!stored) throw error;
+  }
+  if (stored) return stored;
+  throw new ExchangeRateProviderError(
+    `Exchange rate provider did not return ${currency}.`,
+  );
+}
