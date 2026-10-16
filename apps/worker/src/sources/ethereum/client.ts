@@ -138,3 +138,25 @@ async function fetchPage<T extends z.ZodType>(
       : null,
   };
 }
+
+const statsSchema = z.object({
+  coin_price: z
+    .string()
+    .regex(/^\d+(\.\d+)?$/)
+    .nullable(),
+});
+
+/** Blockscout 的 ETH 美元報價；與地址查詢同一服務，避免另外依賴交易所 API。 */
+export async function fetchEthereumUsdPrice(options: ClientOptions = {}) {
+  const payload = await fetchWalletJson(`${BLOCKSCOUT_API_URL}/stats`, {
+    ...options,
+    label: LABEL,
+  });
+  const parsed = statsSchema.safeParse(payload);
+  const priceUsd = Number(parsed.data?.coin_price);
+  if (!parsed.success || !Number.isFinite(priceUsd) || priceUsd <= 0) {
+    throw new WalletApiError(`${LABEL}報價格式無法辨識。`);
+  }
+  // Blockscout 沒有回傳報價時間，以取得時間代替。
+  return { priceUsd, at: new Date().toISOString(), source: "blockscout" };
+}

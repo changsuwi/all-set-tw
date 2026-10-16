@@ -17,6 +17,7 @@ import {
   fetchEthereumBalance,
   fetchEthereumInternalTransactionPage,
   fetchEthereumTransactionPage,
+  fetchEthereumUsdPrice,
   type EthereumInternalTransaction,
   type EthereumTransaction,
 } from "./client";
@@ -31,6 +32,7 @@ export function syncEthereum(env: Env, trigger: SyncTrigger) {
     decimals: 18,
     parseAddresses: (config) =>
       parseEthereumAddresses(parseEthereumConfig(config).addresses),
+    fetchUsdPrice: fetchEthereumUsdPrice,
     collect: collectEthereumWallet,
   });
 }
