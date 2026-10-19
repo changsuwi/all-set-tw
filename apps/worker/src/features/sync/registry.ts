@@ -60,6 +60,7 @@ import {
 } from "../../sources/nextbank/sync";
 import { syncBitcoin } from "../../sources/bitcoin/sync";
 import { syncEthereum } from "../../sources/ethereum/sync";
+import { syncBinance } from "../../sources/binance/sync";
 import { SYNC_SCOPE_ALL, type SyncOutcome, type SyncScope } from "./types";
 
 type ConnectorRuntimeDefinition = {
@@ -159,6 +160,9 @@ export const connectorRuntimeRegistry: Record<
   },
   ethereum: {
     run: (env, trigger) => syncEthereum(env, trigger),
+  },
+  binance: {
+    run: (env, trigger) => syncBinance(env, trigger),
   },
 };
 
