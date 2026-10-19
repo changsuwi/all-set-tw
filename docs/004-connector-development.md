@@ -788,7 +788,17 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 
 - 使用者在幣安建立系統產生（HMAC）的 API key，只勾選讀取權限；`apiKey` 與 `apiSecret` 都存於 `encrypted_config`，不寫入 log、`raw` 或 cursor。幣安回應 `-1002`、`-1022`、`-2008`、`-2014`、`-2015`（key 無效、簽章錯誤、權限不足）時標記 `needs_user_action`。
 - 連線限制（2026-10 實測）：`api.binance.com` 與 `api1`～`api4` 架在 CloudFront 後，對 Workers 出口 IP 一律回 HTTP 403；Cron／Queue consumer 常在美國機房執行，所有 host 都回 HTTP 451 地區封鎖。因此全部請求經 SQLite Durable Object `BinanceEgress`（物件名稱 `binance`、`locationHint` 為 `apac`）送往 `api-gcp.binance.com`；代發只允許該 host 的 HTTPS GET／POST。
+- 兩家交易所共用 `sources/exchange-account.ts`（跨錢包彙總、交易對估價、入出金型別與回溯起點）與 `sources/exchange-account-sync.ts`（美元匯率、持倉／交易／淨值寫入與同日已不存在幣別的刪除）；各交易所目錄只負責簽章 client、錢包端點、入出金正規化與 cursor。
 - 持倉：現貨（`/api/v3/account`，可用 + 凍結）、資金（`/sapi/v1/asset/get-funding-asset`）、活期與定期理財（`/sapi/v1/simple-earn/{flexible,locked}/position`）依幣別加總，每個幣別一筆 `investment_positions`（`asset_type = 'crypto'`、`source_id` 為幣別小寫，`raw` 記各錢包數量與報價）。現貨的 `LD` 開頭資產是活期理財憑證，略過以免重複。理財持倉超過 300 筆時整次失敗，不寫入低估的持倉。
 - 估值：`/api/v3/ticker/price` 依序使用 `<幣>USDT`、`USDC`、`FDUSD` 交易對，視為美元價格，沒有時以 `<幣>BTC × BTCUSDT` 交叉換算，再乘上 `exchange_rates` 的美元匯率。USDT 視為 1 美元，不校正穩定幣價差。無法估價的幣別只記 log；台幣價值不足 1 元的零碎資產不列入。`net_worth_history` 每天一筆所有幣別的合計。同一天再次同步時，先刪除當天已不存在的幣別持倉（同樣受設定 guard 保護）；若所有幣別都已轉出，不會產生當天持倉，資產頁會顯示前一次的持倉。
 - 入出金：`/sapi/v1/capital/deposit/hisrec`（狀態 1、6）與 `/sapi/v1/capital/withdraw/history`（狀態 6）寫入 `investment_transactions`（`account_id = 'exchange'`、`source_id` 為 `deposit:<id>`／`withdraw:<id>`，提領數量為負，手續費與遮罩地址記於 `raw`）。幣安單次查詢須小於 90 天，以 89 天區間由舊到新查詢；首次回溯 365 天，之後從 `sync_cursor.historySyncedUntil` 前 7 天開始，補上當時仍處理中的紀錄。回傳 1000 筆（上限）時對半切分區間，最多 4 次。額度用完或暫時性錯誤時保留已完成的區間，下次同步接續；持倉不受影響。
 - 不同步現貨成交明細（需逐一交易對查詢）、合約、槓桿與 Alpha 資產。
+
+## OKX
+
+- 使用者在 OKX 建立只勾選讀取權限的 API key，設定 `apiKey`（UUID）、`apiSecret`（32 位十六進位）與建立時自訂的 `passphrase`，三者都存於 `encrypted_config`。簽章為 `base64(HMAC-SHA256(secret, timestamp + "GET" + 路徑含 query))`，連同 key、ISO 時間與 passphrase 放在 `OK-ACCESS-*` header。`50100`、`50105`、`50110`、`50111`、`50113`、`50114`、`50120`（key 停用、passphrase／簽章錯誤、IP 白名單、權限不足）標記 `needs_user_action`；`50011`、`50013`、`50001`、`50102` 與 HTTP 429 視為暫時性錯誤。
+- 地區站：API key 只在建立它的站有效（全球站 `www.okx.com`，另有 `my.okx.com`、`eea.okx.com`）。同步以交易帳戶查詢依序嘗試，回應 `50119`（key 不存在）時換下一站，全部不存在時要求使用者重新設定；成功的站記在 `sync_cursor.apiHost`，下次優先使用。變更 key 會清除 cursor 並重新偵測。
+- 連線限制（2026-10 實測）：公開端點從一般請求、亞太 Durable Object 與美國機房的 Cron 都能連線，沒有地區封鎖；但公開行情依 IP 限流，Workers 共用出口 IP，約半數請求回 429（`50011`），因此行情查詢最多重試 2 次、每次等待 1.5 秒。帶簽章的帳戶端點在美國機房是否受合規限制無法事先確認，所有請求仍經 SQLite Durable Object `OkxEgress`（物件名稱 `okx`、`locationHint` 為 `apac`）送出；代發只允許上述三個 host 的 HTTPS GET。
+- 持倉：交易帳戶（`/api/v5/account/balance` 的 `eq`）、資金帳戶（`/api/v5/asset/balances` 的 `bal`）、簡單賺幣（`/api/v5/finance/savings/balance` 的 `amt`）與鏈上賺幣進行中訂單的投入本金（`/api/v5/finance/staking-defi/orders-active` 的 `investData`）依幣別加總；尚未發放的鏈上賺幣收益不列入。估值使用 `/api/v5/market/tickers?instType=SPOT`，交易對格式為 `BTC-USDT`，其餘規則與幣安相同。
+- 入出金：`/api/v5/asset/deposit-history` 與 `/api/v5/asset/withdrawal-history` 由新到舊分頁（每頁 100 筆，以 `after` 往前翻；因 `after` 不含等於的時間，以最舊時間 + 1 繼續並以來源 id 去重），只記 `state = 2`（成功）的紀錄，`source_id` 為 `deposit:<depId>`／`withdraw:<wdId>`。首次回溯 365 天，之後從 `sync_cursor.historySyncedUntil` 前 7 天開始；兩類都完整取得才推進 cursor，額度用完或暫時性錯誤時保留舊 cursor，已取得的紀錄照常寫入。
+- 不同步成交明細；合約與槓桿部位只反映在交易帳戶的幣別權益。

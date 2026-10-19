@@ -238,6 +238,8 @@ npm run dev
 
 幣安 API 請求由 `BinanceEgress` Durable Object 代發（migration tag `v3`），設定方式相同；既有私人 `wrangler.local.toml` 需自行補上 `BINANCE_EGRESS` binding 與 `v3` migration。使用者在幣安建立 API key 時只勾選「讀取」權限；Workers 沒有固定出口 IP，無法設定 IP 白名單。
 
+OKX API 請求由 `OkxEgress` Durable Object 代發（migration tag `v4`），既有私人 `wrangler.local.toml` 需自行補上 `OKX_EGRESS` binding 與 `v4` migration。OKX API key 同樣只勾選「讀取」、不設 IP 白名單，並需填寫建立時自訂的 Passphrase。
+
 以太坊錢包同步預設使用 Blockscout 公開 API，未帶 API key 時依 IP 限流；Workers 共用 Cloudflare 出口 IP，常在第一個請求就收到 HTTP 429。可到 [Blockscout 開發者入口](https://dev.blockscout.com) 免費註冊並建立 API key（以 `proapi_` 開頭），在 Worker 的 **Settings → Runtime variables and secrets** 新增 Secret `BLOCKSCOUT_API_KEY`，或執行 `npx wrangler secret put BLOCKSCOUT_API_KEY`。設定後改用 PRO API，以 key 計算額度；免費方案為每秒 5 個請求、每日 100K credits。未設定時維持公開 API，並在 429 時依回應的重置時間短暫等待後重試。
 
 本機 `apps/worker/.dev.vars.example` 保留手動金鑰設定；請填入開發用隨機金鑰。若需解密正式資料，正式部署也必須在最初自行提供並保存相同金鑰；公開部署範例的 `auto` 只會由部署 script 初始化。

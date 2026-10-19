@@ -37,6 +37,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   bitcoin: "比特幣錢包",
   ethereum: "以太坊錢包",
   binance: "幣安 Binance",
+  okx: "OKX",
 };
 
 export function syncNotificationPayload(

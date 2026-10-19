@@ -61,6 +61,7 @@ import {
 import { syncBitcoin } from "../../sources/bitcoin/sync";
 import { syncEthereum } from "../../sources/ethereum/sync";
 import { syncBinance } from "../../sources/binance/sync";
+import { syncOkx } from "../../sources/okx/sync";
 import { SYNC_SCOPE_ALL, type SyncOutcome, type SyncScope } from "./types";
 
 type ConnectorRuntimeDefinition = {
@@ -163,6 +164,9 @@ export const connectorRuntimeRegistry: Record<
   },
   binance: {
     run: (env, trigger) => syncBinance(env, trigger),
+  },
+  okx: {
+    run: (env, trigger) => syncOkx(env, trigger),
   },
 };
 

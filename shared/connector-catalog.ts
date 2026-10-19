@@ -552,6 +552,26 @@ export const connectorCatalog = {
     secretStateFields: [],
     resetOnCredentialChangeFields: [],
   },
+  okx: {
+    id: "okx",
+    title: "OKX",
+    description: "交易、資金與賺幣帳戶的加密貨幣餘額，以及入金、提領紀錄",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "investment_position",
+      "investment_transaction",
+      "net_worth_history",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "apiKey", label: "API Key（僅勾選讀取權限）", type: "text" },
+      { key: "apiSecret", label: "Secret Key", type: "password" },
+      { key: "passphrase", label: "Passphrase", type: "password" },
+    ],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;
