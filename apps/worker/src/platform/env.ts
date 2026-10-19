@@ -14,6 +14,7 @@ export interface Env {
   AI: Ai;
   MEGABANK_EGRESS: DurableObjectNamespace;
   FUBON_EGRESS: DurableObjectNamespace;
+  BINANCE_EGRESS: DurableObjectNamespace;
   CONFIG_ENCRYPTION_KEY?: string;
   GENERATED_CONFIG_ENCRYPTION_KEY?: string;
   VAPID_PUBLIC_KEY?: string;

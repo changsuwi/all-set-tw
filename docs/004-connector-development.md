@@ -783,3 +783,12 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 淨變化以整組自有地址計算並以 BigInt（satoshi／wei）運算：自有地址互轉只記手續費；BTC 找零回到自有地址不算轉出；ETH 失敗交易只扣 gas；Blockscout 內部交易 index 0 為最上層呼叫，略過以免與一般交易重複。
 - 免費方案每次呼叫最多 50 個對外請求，每次同步以 45 個為額度：匯率更新保留 1 個，報價與區塊鏈查詢共用其餘額度；回應 429 時依 `x-ratelimit-reset`／`Retry-After` 等待（最多 3 秒）後重試，最多 2 次，每次重試也從額度扣除。先查所有地址餘額，再由新到舊取得上次同步後的新交易，剩餘額度才接續首次同步未取完的舊歷史。`sync_cursor` 以地址 SHA-256 前 16 碼為鍵，記錄已處理的區塊高度與續取位置，不含地址本身。新交易若無法在額度內接上已處理高度，保留舊 cursor 下次重試，不留下缺口。
 - 只計已確認交易；未確認交易與 ERC-20 代幣不納入。
+
+## 幣安 Binance
+
+- 使用者在幣安建立系統產生（HMAC）的 API key，只勾選讀取權限；`apiKey` 與 `apiSecret` 都存於 `encrypted_config`，不寫入 log、`raw` 或 cursor。幣安回應 `-1002`、`-1022`、`-2008`、`-2014`、`-2015`（key 無效、簽章錯誤、權限不足）時標記 `needs_user_action`。
+- 連線限制（2026-10 實測）：`api.binance.com` 與 `api1`～`api4` 架在 CloudFront 後，對 Workers 出口 IP 一律回 HTTP 403；Cron／Queue consumer 常在美國機房執行，所有 host 都回 HTTP 451 地區封鎖。因此全部請求經 SQLite Durable Object `BinanceEgress`（物件名稱 `binance`、`locationHint` 為 `apac`）送往 `api-gcp.binance.com`；代發只允許該 host 的 HTTPS GET／POST。
+- 持倉：現貨（`/api/v3/account`，可用 + 凍結）、資金（`/sapi/v1/asset/get-funding-asset`）、活期與定期理財（`/sapi/v1/simple-earn/{flexible,locked}/position`）依幣別加總，每個幣別一筆 `investment_positions`（`asset_type = 'crypto'`、`source_id` 為幣別小寫，`raw` 記各錢包數量與報價）。現貨的 `LD` 開頭資產是活期理財憑證，略過以免重複。理財持倉超過 300 筆時整次失敗，不寫入低估的持倉。
+- 估值：`/api/v3/ticker/price` 依序使用 `<幣>USDT`、`USDC`、`FDUSD` 交易對，視為美元價格，沒有時以 `<幣>BTC × BTCUSDT` 交叉換算，再乘上 `exchange_rates` 的美元匯率。USDT 視為 1 美元，不校正穩定幣價差。無法估價的幣別只記 log；台幣價值不足 1 元的零碎資產不列入。`net_worth_history` 每天一筆所有幣別的合計。同一天再次同步時，先刪除當天已不存在的幣別持倉（同樣受設定 guard 保護）；若所有幣別都已轉出，不會產生當天持倉，資產頁會顯示前一次的持倉。
+- 入出金：`/sapi/v1/capital/deposit/hisrec`（狀態 1、6）與 `/sapi/v1/capital/withdraw/history`（狀態 6）寫入 `investment_transactions`（`account_id = 'exchange'`、`source_id` 為 `deposit:<id>`／`withdraw:<id>`，提領數量為負，手續費與遮罩地址記於 `raw`）。幣安單次查詢須小於 90 天，以 89 天區間由舊到新查詢；首次回溯 365 天，之後從 `sync_cursor.historySyncedUntil` 前 7 天開始，補上當時仍處理中的紀錄。回傳 1000 筆（上限）時對半切分區間，最多 4 次。額度用完或暫時性錯誤時保留已完成的區間，下次同步接續；持倉不受影響。
+- 不同步現貨成交明細（需逐一交易對查詢）、合約、槓桿與 Alpha 資產。

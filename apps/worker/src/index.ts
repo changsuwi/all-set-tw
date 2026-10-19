@@ -26,6 +26,7 @@ import { apiErrorResponse, demoReadOnlyMiddleware } from "./platform/http";
 
 export { MegabankEgress } from "./platform/megabank-egress-object";
 export { FubonEgress } from "./platform/fubon-egress-object";
+export { BinanceEgress } from "./platform/binance-egress-object";
 
 export const app = honoFactory.createApp();
 export const api = honoFactory.createApp();

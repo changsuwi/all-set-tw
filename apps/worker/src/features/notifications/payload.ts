@@ -36,6 +36,7 @@ const connectorLabels: Record<ConnectorId, string> = {
   fubon: "台北富邦銀行",
   bitcoin: "比特幣錢包",
   ethereum: "以太坊錢包",
+  binance: "幣安 Binance",
 };
 
 export function syncNotificationPayload(

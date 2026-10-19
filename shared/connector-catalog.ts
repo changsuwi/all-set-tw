@@ -533,6 +533,25 @@ export const connectorCatalog = {
     secretStateFields: [],
     resetOnCredentialChangeFields: [],
   },
+  binance: {
+    id: "binance",
+    title: "幣安 Binance",
+    description: "現貨、資金與理財帳戶的加密貨幣餘額，以及入金、提領紀錄",
+    connectionMode: "api_credentials",
+    scopes: ["all"],
+    capabilities: [
+      "investment_position",
+      "investment_transaction",
+      "net_worth_history",
+    ],
+    publicFields: [],
+    credentialFields: [
+      { key: "apiKey", label: "API Key（僅勾選讀取權限）", type: "text" },
+      { key: "apiSecret", label: "Secret Key", type: "password" },
+    ],
+    secretStateFields: [],
+    resetOnCredentialChangeFields: [],
+  },
 } as const satisfies Record<string, ConnectorCatalogEntry>;
 
 export type ConnectorId = keyof typeof connectorCatalog;

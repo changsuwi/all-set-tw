@@ -296,6 +296,10 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     return manualSyncResponse(c, "ethereum");
   });
 
+  api.post("/connectors/binance/sync", async (c) => {
+    return manualSyncResponse(c, "binance");
+  });
+
   api.post("/connectors/sinopac/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "sinopac"));
