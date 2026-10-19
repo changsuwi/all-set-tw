@@ -19,6 +19,7 @@ import { fubonConfigSchema } from "./fubon/protocol";
 import { bitcoinConfigSchema } from "./bitcoin/protocol";
 import { ethereumConfigSchema } from "./ethereum/protocol";
 import { binanceConfigSchema } from "./binance/protocol";
+import { okxConfigSchema } from "./okx/protocol";
 
 export const connectorConfigSchemas = {
   einvoice: invoiceConfigSchema,
@@ -40,6 +41,7 @@ export const connectorConfigSchemas = {
   bitcoin: bitcoinConfigSchema,
   ethereum: ethereumConfigSchema,
   binance: binanceConfigSchema,
+  okx: okxConfigSchema,
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export function parseConnectorConfig(

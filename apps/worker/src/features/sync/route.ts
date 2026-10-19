@@ -300,6 +300,10 @@ function registerSyncRoutes(api: Hono<AppBindings>) {
     return manualSyncResponse(c, "binance");
   });
 
+  api.post("/connectors/okx/sync", async (c) => {
+    return manualSyncResponse(c, "okx");
+  });
+
   api.post("/connectors/sinopac/captcha", async (c) => {
     try {
       return c.json(await prepareConnectorChallenge(c.env, "sinopac"));
