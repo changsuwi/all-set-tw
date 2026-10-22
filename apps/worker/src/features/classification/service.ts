@@ -7,9 +7,13 @@ export type ClassificationResult = {
     | "system_rule"
     | "auto_transfer"
     | "auto_offset"
+    | "auto_refund"
+    | "ai"
     | "fallback";
   ruleId?: string;
   excludedFromCalculation?: boolean;
+  /** A merchant refund that reduces its category's expense. */
+  refund?: boolean;
 };
 
 export type ClassifiedTransaction = {

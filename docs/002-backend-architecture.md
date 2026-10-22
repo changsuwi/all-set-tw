@@ -256,7 +256,7 @@ Middleware 應只處理跨功能的 request concern，不應承擔 feature 商�
 
 實體目錄集中不改變相依邊界：`sync.ts` 可依賴 connector、protocol、client、repository 與明確的共用 service；protocol／client 不得依賴 Hono、D1、Worker `Env`、adapter 或同步流程，也不得直接寫入資料庫。來源之間不引用彼此的內部實作。
 
-`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts` 與 `credit-card-status.ts` 提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
+`sources` 根目錄只保留跨來源使用的能力：`browser.ts` 管 browser acquisition、capacity 錯誤、登入前頁面停滯復原與有期限的 session 清理，`types.ts` 定義後端 `Connector`／`SyncResult`，`financial-types.ts` 定義 connector 正規化後的金融資料（`BankAccount`、`BankTransaction`、`CreditCardBill`、`Invoice` 等），`sync-window.ts`、`credit-card-status.ts` 與 `captcha-retry.ts`（API 型來源的自動驗證碼重試）提供共同 policy／判斷。`config-registry.ts` 直接引用各來源的純 schema，供設定 feature 使用；同步 handler 仍由 `features/sync/registry.ts` 組裝。Worker 與測試直接引用來源檔案，不建立跨來源的實作匯出入口。
 
 Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；OCR、送出登入與資料查詢留在來源 adapter，政策細節見 `docs/004-connector-development.md`。
 
@@ -270,6 +270,7 @@ Browser 登入前復原最多三次嘗試，只包住頁面與驗證碼準備；
 - 銀行與信用卡帳單 API response contract。
 - 設定頁的排程、連接器設定狀態與分類規則 API response contract，以及排程間隔、分類規則欄位與比對方式的允許值。
 - 活動配對、去重、排序與資料組裝。
+- 近期繳款提醒（`payment-reminders.ts`）：總覽「值得留意」與預設排程推播共用同一套到期與繳款狀態判斷。
 
 不得將 Hono `Context`、D1 row 或 Puppeteer object 放入共用契約。
 
@@ -336,6 +337,8 @@ Drizzle repository 整合測試使用 `apps/worker/tests/helpers/d1.ts` 的 Mini
 `invoice_transaction_preferences` 的 `invoice_id`／`transaction_id` 使用 FK，
 刪除策略為 `NO ACTION`。合併資料須在同一 batch 先移轉或明確處理偏好，再刪除舊資料；
 不得以 CASCADE 或自動清空交易 ID 抹除 linked／separate 決策。
+`classification_overrides.target_id` 與 `ai_classifications.transaction_id` 以文字保存交易 ID，不設 FK；
+交易合併時分類覆寫由 `transaction-merge.ts` 移轉，AI 結果不移轉，新 ID 由下一次近期掃描重新判斷。
 玉山 lifecycle shadow、永豐及華南 legacy 比對共用 `transaction-merge.ts`：
 僅合併雙向唯一對應且發票配對、計算偏好、分類覆寫不衝突的交易。
 在同一 promotion batch 移轉偏好與交易引用後才刪除舊交易，保留決策及時間；
@@ -502,6 +505,70 @@ X-Next-Cursor: <opaque-cursor>
 
 只有 `X-Has-More` 為 `true` 時，才需要回傳 `X-Next-Cursor`。
 
+## 銀行交易分類與退費
+
+`features/bank/service.ts` 回傳交易時依序決定分類：年費減免沖銷（`auto_offset`）、
+跨帳戶轉帳配對（`auto_transfer`），其餘沿用 `classification/service.ts` 的分類覆寫與規則結果。
+
+系統分類與規則由 migration 維護，Demo 種子資料（`seeds/demo.sql`）需同步。「回饋」（`reward`）與「捐款」（`donation`）為系統分類；
+新增時既有同名自訂分類會併入，分類覆寫與規則改指向系統分類。可由摘要確定分類的模式使用系統規則：
+信用卡繳款入帳（轉帳，排除計算）、消費折抵與回饋（回饋，優先於其他收入與生活繳費規則）、
+電子支付儲值、加值與提領（轉帳；透過電子支付付款給商家不適用）、Uber Eats（餐飲，優先於交通規則的 uber 關鍵字）、捐款關鍵字，
+以及超商、超市與量販店一律歸購物（不論購買品項，優先於店名中的車站或餐飲字樣）。
+信用卡繳款入帳的字樣與 `calculation-service.ts` 的預設排除計算一致。
+系統規則需適用多數使用者與銀行；只在單一帳戶看到的摘要格式不新增系統規則，交由使用者規則或手動分類處理。
+
+`features/bank/refund-matching.ts` 將信用卡的正數商家交易對回原消費：同一張卡與幣別、
+同一商家（店名相同，或共用至少 4 字且達較短店名 60% 的連續字串）、原扣款在退費前 90 天內且金額不小於退費。
+比對店名前先移除常見電子支付與金流前綴（如 LINE Pay、全支付、街口、綠界、藍新），避免同一支付管道下的不同店家被配對；
+共用字串門檻讓收單前綴、商家類別或城市與國別後綴不同的同一店名仍可配對，但不會只因共用通用字詞而配對。
+部分退費與分次退費可對到同一筆扣款；同時有多筆候選時，金額相同者優先，再取最近的一筆。
+摘要含折抵、回饋、減免、紅利、點數、年費、繳款、扣繳、入帳或還款的正數交易不視為退費；
+已排除計算的扣款也不作為原消費。
+
+配對成功時：
+
+- 退費原本未分類：沿用原消費的分類，來源為 `auto_refund`，並標記 `refund: true`。
+- 退費已有分類覆寫或規則分類：只有與原消費同分類時才標記 `refund: true`；分類不同時尊重既有分類，仍視為收入。
+
+同一張卡與幣別、同一商家、同一天且金額完全相同的一買一退（例如取消訂單或綁卡驗證的暫時授權，含待入帳）一對一配對，
+兩筆都排除計算；部分退費或跨日退費仍以上述方式扣減分類支出。任一筆有分類覆寫、使用者規則或手動設為列入計算時不配對。
+月份區間已包含同日的兩筆，因此不另外查詢。
+
+標記為退費的交易計入支出側並扣減該分類支出，不計入收入；前端計算方式見 `docs/003-frontend-architecture.md` 的「活動金額顯示」。
+原消費可能不在當頁或當月，因此會另外查詢退費所在信用卡在 90 天內的扣款作為候選。
+
+## AI 自動分類
+
+使用者可在「設定 → 分類」啟用 AI 自動分類，預設停用。實作位於 `features/classification`：
+`ai-classifier.ts` 組成 Workers AI Clef（`@cf/cloudflare/clef-flash`）請求與解讀回答，
+`ai-service.ts` 負責設定、掃描與每日用量，`ai-repository.ts` 存取 `ai_classification_settings` 與 `ai_classifications`。
+
+- **套用順序**：分類覆寫 → 使用者規則 → 系統規則 → 年費沖銷與帳戶互轉 → AI → 未分類。
+  `bank/service.ts` 只以 AI 結果補上規則判斷為 `fallback` 的交易，來源為 `ai`；退費配對優先於 AI 結果。
+  停用後不再分類新的活動，已保存的結果繼續套用，直到使用者清除。
+- **判斷依據**：系統分類的定義維護於 `SYSTEM_CATEGORY_DESCRIPTIONS`，自訂分類以名稱作為選項；
+  支出不提供只用於收入的系統分類，入帳只提供收入、轉帳與投資類系統分類及自訂分類。
+  送出日期、帳戶類型、方向、金額、幣別、摘要、交易對象與配對發票的賣方及品項；最高機率低於 0.35 時保存為無法判斷（`category_id` 為 NULL）。
+  回答中只採用請求提供的選項。
+- **掃描**：處理目前為 `fallback` 且有文字可判斷的交易，依月份由新到舊讀取 `getBankRange`，與活動頁相同地去重並配對發票。
+  待入帳交易也會分類，讓入帳前即可顯示；已配對到其他交易而隱藏的待入帳紀錄不送出。
+  配對時 AI 結果不移轉到入帳紀錄，入帳紀錄依其商店名稱另行判斷，因此一筆刷卡約使用 2 次呼叫。
+  已由 AI 分類的交易不會重新判斷，使用者清除 AI 分類結果後再回補才會重新分類。
+  無法判斷的交易在送出內容的雜湊改變時（例如晚到的發票）才重試，未變更時不重複呼叫。
+  啟用時只記錄 `enabled_at` 並以當下資料浮水印為基準，不啟動掃描。
+  近期掃描涵蓋含當月的最近 3 個月：每次 Cron 比對交易、發票與發票配對的最新 `updated_at`，資料改變時啟動；
+  只處理 `created_at` 不早於 `enabled_at` 的交易，以及回補時判斷為無法判斷者，啟用前的其他紀錄不會自動送出。
+  過往紀錄回補只由使用者啟動，從當月處理到最早的交易月份，不受 `enabled_at` 限制。同一時間只有一個掃描。
+- **掃描識別碼**：每次開始近期掃描或回補都產生新的 `scan_id`，停用與清除結果會先清空它（清除時先清空再刪除結果）。
+  AI 結果與掃描進度只在 `scan_id` 仍相符時寫入；不符時該掃描立即停止，不覆寫較新的回補、清除或停用狀態。
+  每日呼叫次數以累加更新，不受掃描識別碼影響。
+- **Queue**：掃描以 `run-ai-classification` 訊息在 `SYNC_QUEUE` 執行，每次 invocation 最多 25 次 AI 呼叫、6 個月份，未完成時以 1 秒延遲串接。
+  進度保存在 D1；訊息失敗時直接 ack，由 Cron 恢復閒置超過 5 分鐘的掃描。
+- **用量**：每日最多 2,000 次呼叫（每次約 2.5 neurons，約佔 Workers AI 每日免費額度一半，保留給驗證碼辨識）。
+  達到上限或 Workers AI 回傳 `3036`（免費額度用完）時暫停到 UTC 隔日 00:00，由 Cron 繼續；暫時性錯誤留待 Cron 恢復；其他錯誤保存為無法判斷，避免重複重試。
+- Demo 模式不啟動掃描，訊息直接 ack。
+
 ## 讀取 API 效能
 
 線上讀取耗時主要來自 D1 往返與冷啟動，個別查詢的執行時間通常只有數毫秒。
@@ -511,7 +578,7 @@ X-Next-Cursor: <opaque-cursor>
 - 只需帳戶與餘額的頁面使用 `GET /api/bank/accounts`，不載入交易、轉帳配對與分類。
 - 資料來源卡片的設定狀態沿用 `/api/sync-jobs` 的 `configured`；開啟連接器詳情時才讀取 `/api/connectors/:connectorId/settings`。
 - `GET /api/activity/invoice-mappings` 接受與其他區間 API 相同的 `from`／`to` 月份。發票與交易必須同一個台北日才能連結，因此頁面只讀取區間內發票的決定；未帶區間時回傳全部。
-- 銀行交易分類時，分類規則與第一輪查詢並行，當頁交易的分類覆寫與轉帳候選並行；只有頁面外的轉帳候選需要再查一次覆寫。
+- 銀行交易分類時，分類規則與第一輪查詢並行，當頁交易的分類覆寫、轉帳候選與退費原消費候選並行；只有頁面外的候選需要再查一次覆寫。退費候選依信用卡帳戶走 `idx_bank_transactions_account_posted_date`，只在當頁有信用卡正數交易時查詢。
 - 各 connector／asset type 的最新持倉統一使用 `db/investment-positions.ts`，以一次 GROUP BY 取得最新日期，不逐列執行 MAX 子查詢。
 - Cloudflare Access 公鑰只在 isolate 記憶體快取；Access 後方的 Worker 無法使用 Cache API。同一 isolate 的並行請求共用同一次下載與匯入後的金鑰。
 - 以日期 expression 篩選區間時，需同時保留可走索引的原始欄位範圍條件，並以 EXPLAIN QUERY PLAN 確認。
@@ -563,6 +630,7 @@ sources/
 ├── types.ts
 ├── config-registry.ts
 ├── sync-window.ts
+├── captcha-retry.ts
 ├── credit-card-status.ts
 ├── esun/
 │   ├── sync.ts                # 玉山同步 use case
@@ -711,7 +779,7 @@ Browser session 取得與登入頁復原重開，皆由共用 browser adapter �
 
 Demo 模式（`DEMO_MODE`）不執行背景同步：Cron 不送出 scheduler 啟動訊息，Queue consumer
 不處理任何訊息，避免啟用 Demo 前殘留的訊息繼續以已儲存的憑證登入外部服務。scheduler 啟動訊息
-直接 ack；電子發票與集保分段訊息及背景手動同步訊息則以 1 小時延遲重新送出以保留 continuation，關閉 Demo 後會
+與 AI 自動分類訊息直接 ack；電子發票與集保分段訊息及背景手動同步訊息則以 1 小時延遲重新送出以保留 continuation，關閉 Demo 後會
 重新檢查進行中的 durable run；已超過整體期限者結案，需要重新啟動同步。若期間 session 過期或設定變更，仍可能需要重新驗證。
 
 電子發票不在單一 connector invocation 內擷取所有品項明細。它使用
@@ -800,9 +868,15 @@ connector lock 保留到報告結果寫入及 run 成功結案；失敗的 run t
 - `route.ts`：推播設定、裝置 subscription、偏好與測試通知 API。
 - `service.ts`：VAPID 設定、subscription 加密、通知派送與失效 endpoint 清理。
 - `repository.ts`：`push_subscriptions` 與 `notification_preferences` 的 D1 存取。
-- `payload.ts`：將 sync status 轉成不含金融明細的安全通知內容。
+- `payload.ts`：將 sync status 與繳款提醒轉成不含金額等金融明細的安全通知內容，並決定預設排程摘要是否送出。
 
 排程同步與背景手動同步更新 `sync_jobs` 後才呼叫通知 service；request 內的接續同步由畫面直接顯示結果，不另行推播。通知是 best-effort；發送失敗只記錄 log，不得將成功同步改成失敗。瀏覽器 subscription payload 使用既有設定加密金鑰保存。
+
+預設排程批次的摘要推播會附上近期繳款提醒（偏好 `paymentDue`，預設開啟），不另外送出繳款推播。service 以銀行 service 讀取帳戶與近三個月帳單，交給共用的 `collectPaymentReminders` 判斷；讀取失敗只記錄 log，照常送出原本的同步摘要。
+
+- 內容只寫機構、帳戶類型與天數（例如「國泰世華信用卡明天到期」），最多列兩筆，不含金額；狀態未確定或已過期限時加註「請確認是否已繳」，貸款加註「請確認餘額」，與總覽一致。成功摘要改為「同步完成，N 筆繳款即將到期」並導向總覽；有失敗或需處理時沿用原標題，於內文附上繳款提醒。
+- 同步狀態本來就會推播時附上所有提醒；該狀態的通知關閉時，只有今天或明天到期、扣款未完成或已過期限的提醒會讓推播照樣送出。此時同步成功沿用「同步完成，N 筆繳款即將到期」；同步失敗或需處理則只送繳款內容，不帶出使用者已關閉的同步狀態。是否送出只依當下資料判斷，不另外記錄已提醒的帳單。
+- 手動同步與自訂排程的逐工作推播不附繳款提醒，避免同一天重複。
 
 使用預設排程（`schedule_mode = inherit`）的工作採「一輪一批次」。沒有進行中的批次且至少一個繼承工作到期時，scheduler 會以單一 D1 batch transaction 建立 header，並固定快照當下所有啟用且不需使用者處理的繼承工作。批次進行期間，每次 Queue consumer invocation 只從尚未完成的固定成員中挑選一個目前未鎖定且不需使用者處理的工作；已完成的成員不會在同一輪再次執行，新啟用的工作則等下一輪。排程結果會在釋放 connector lock 前直接寫入成員，避免重複 Queue 訊息遺漏結果；停用、改為自訂排程或進入 `needs_user_action` 的非執行中成員會被略過。只有所有固定成員都有結果或被略過時，scheduler 才以條件式更新取得一次推播發送權並關閉批次，下一輪才能建立。建立新輪次時會清理超過 30 天的已結案批次。手動同步不完成或改寫進行中的批次成員；自訂排程維持逐工作推播。
 

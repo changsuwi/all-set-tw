@@ -9,7 +9,7 @@
 - 資料庫使用 Cloudflare D1；schema 變更由 `apps/worker/migrations` 管理。
 - 身分驗證使用 Cloudflare Access，由 Worker 驗證 Access JWT。
 - 需要瀏覽器操作的銀行連接器使用 Cloudflare Browser Rendering 與 Puppeteer。
-- 驗證碼辨識使用 Cloudflare Workers AI。
+- 驗證碼辨識與選用的 AI 自動分類使用 Cloudflare Workers AI。
 - 排程同步使用 Workers Cron Triggers 啟動 Cloudflare Queue，並以 D1 sync jobs
   逐一執行 connector；每個 connector 使用獨立的 Queue consumer invocation。
 
@@ -30,7 +30,7 @@
 - `apps/worker/src/features/sync/scheduling`：排程設定、到期工作選取、Queue dispatch 與預設排程批次。
 - `apps/worker/src/features/sync/reports`：同步報告 API、金融快照與活動變化明細。
 - `apps/worker/src/sources/<connectorId>`：依資料來源集中 `sync.ts`、connector、protocol、client 與專用配對／修復；電子發票與集保在此管理 Queue 分段同步與 `run-repository.ts`。
-- `apps/worker/src/sources` 根目錄：跨來源共用的 browser 工具、設定 registry、純型別與同步回溯 policy。來源的 protocol／client 不依賴 Hono、D1、Worker `Env` 或同步流程。
+- `apps/worker/src/sources` 根目錄：跨來源共用的 browser 工具、設定 registry、純型別、同步回溯與自動驗證碼重試 policy。來源的 protocol／client 不依賴 Hono、D1、Worker `Env` 或同步流程。
 - `apps/worker/src/db`：跨後端 feature 共用的 D1 基礎能力與 Drizzle schema／client。
 - `apps/worker/migrations`、`apps/worker/schema-metadata.json`、`apps/worker/seeds`：資料庫遷移、schema 文件語意與 Demo 種子資料。
 - 根目錄 `shared/`：前後端共用的穩定型別、契約與純活動處理邏輯，一律從 `@taiwan-fin-hub/shared` 的 `index.ts` 引用；只有 Worker 使用的型別不放這裡。

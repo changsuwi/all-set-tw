@@ -49,6 +49,15 @@ export function formatPositionQuantity(position: {
   return `${formatNumber(position.quantity ?? 0)} 單位`;
 }
 
+/**
+ * Sign for a net income or expense total shown as a magnitude. Refunds can
+ * make a month's net expense negative, which is a net inflow.
+ */
+export function flowAmountSign(flow: "income" | "expense", value: number) {
+  if (value === 0) return flow === "income" ? "+" : "−";
+  return (flow === "expense") === value > 0 ? "−" : "+";
+}
+
 export function formatCompactTwd(value: number) {
   if (moneyState.hidden) return "••••";
   const abs = Math.abs(value);

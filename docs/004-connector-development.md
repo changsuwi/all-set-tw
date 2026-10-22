@@ -22,14 +22,14 @@ Connector 採三層 registry：
 
 新增 connector 前先選擇最接近的連接模式：
 
-| Mode                      | 適用情境                                                 | 現有範例                                   |
-| ------------------------- | -------------------------------------------------------- | ------------------------------------------ |
-| `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票、中信、新光                       |
-| `api_captcha_session`     | App API 登入含 CAPTCHA，challenge 僅短暫加密保存         | 王道、兆豐銀行                             |
-| `api_device_otp`          | API 登入，首次裝置需要 OTP                               | 集保 e 存摺                                |
-| `browser_per_sync`        | 每次同步都必須以 Browser 登入與擷取                      | 國泰世華                                   |
-| `browser_session`         | Browser 只負責登入，後續使用可復用的 HTTP session        | 玉山                                       |
-| `browser_captcha_session` | Browser 登入含 CAPTCHA，可由 AI 或人工完成並復用 session | 永豐、台新、華南、第一銀行、凱基、台北富邦 |
+| Mode                      | 適用情境                                                 | 現有範例                                             |
+| ------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
+| `api_credentials`         | 帳密登入外部 API，可自行更新 token                       | 電子發票、中信、新光                                 |
+| `api_captcha_session`     | App API 登入含 CAPTCHA，challenge 僅短暫加密保存         | 王道、兆豐銀行                                       |
+| `api_device_otp`          | API 登入，首次裝置需要 OTP                               | 集保 e 存摺                                          |
+| `browser_per_sync`        | 每次同步都必須以 Browser 登入與擷取                      | 國泰世華                                             |
+| `browser_session`         | Browser 只負責登入，後續使用可復用的 HTTP session        | 玉山                                                 |
+| `browser_captcha_session` | Browser 登入含 CAPTCHA，可由 AI 或人工完成並復用 session | 永豐、台新、華南、第一銀行、凱基、台北富邦、遠東商銀 |
 
 不要為單一銀行建立新的通用框架。只有登入生命週期真的不同時才新增 mode，並同時補上 catalog 說明；新增核心風險時才擴充共同測試。
 
@@ -149,11 +149,33 @@ session 忙碌，原有專屬 API 錯誤碼仍供這些情境使用。session �
 - 日期使用 ISO 8601；帳單期間使用 `YYYY-MM`；幣別使用大寫代碼。
 - `BankTransaction.authorizedAt` 與 `Invoice.invoiceDate`：來源只有日期時使用 `YYYY-MM-DD`；來源確實提供時間時使用含明確時區的 ISO timestamp。不得以補上的午夜或同步時間假造交易時間；台灣來源未標時區的交易時間以 `+08:00` 解讀。
 - 補充交易時間時須保留既有 `sourceId` 算法；`postedDate` 維持入帳日期用途。未入帳轉已入帳或重新同步只提供日期時，須保留同筆交易原有的可靠時間。
+- 多張卡共用一個信用卡帳戶時，以 `BankTransaction.cardLast4` 標示實際刷卡的末四碼；只有能唯一對應到具名卡片時才填 `cardName`，無法確定就留空，不猜測。兩者只供顯示（交易帳戶名稱顯示為「卡名 · 末四碼」，缺卡名時為「帳戶名稱 · 末四碼」），不得納入 `sourceId`、配對或負債計算，也不改變帳戶與帳單的拆分方式。
+  - 共用帳戶名稱不得使用其中一張卡的卡名或末四碼。
+  - 目前中信、台新、永豐填卡名與末四碼：中信對照 `cardDataList`；台新取 `cardname`／`order` 去除遮蔽卡號後的文字，同一末四碼出現不同名稱時不填，已入帳沿用同卡名稱；永豐取每筆交易自帶的 `CardName`／`CARDNAME`，但帳單繳款（`自扣`／`繳款`）可能掛在任一張卡下，兩個欄位都不填。
+  - 兆豐、華南、富邦、遠東商銀只填末四碼；繳款等不帶卡號的列留空。
+  - 第一銀行、玉山以卡片帳戶區分，不需這兩個欄位；國泰、新光的交易資料沒有卡號，未填。
 - 支出與負債為負，退款與入帳為正。
 - `raw` 只能保留遮罩或白名單資料，主要功能不得依賴 raw shape。
 - 一般 connector 的資料必須經 `record-mapper.ts` 與 staged persistence；durable-run
   connector 可直接以其 run item table 作為 staging source。資料 promotion 與 cursor
   必須放在同一 guarded D1 batch，secret state 需以設定版本 CAS 保護。
+
+信用卡帳單的缺欄保留是所有 connector 的共用 persistence 行為：`statement_amount`、
+`minimum_payment`、`paid_amount`、`payment_due_date`、`statement_closing_date` 均以
+`COALESCE(excluded.x, credit_card_bills.x)` 更新；新值為 NULL（含 mapper 正規化後的缺值）
+時保留既有值，明確提供的 0、負金額及新日期仍可更新。`is_paid` 共用「一旦已繳，維持已繳」
+規則，未知狀態不清除已知狀態；銀行明確回報的已繳狀態修正由該來源的 repository 與
+`sync.ts` 組合於 `afterPromoteStatements` 處理，不在共用 persistence 中以 connector ID 分支。
+
+## 信用卡負債
+
+信用卡負債快照一律使用 `sources/credit-card-liability.ts` 的 `creditCardLiabilityBalance`：
+**帳單剩餘應繳 + 未出帳總額**，以相反號保存（負數為欠款、正數為溢繳），四捨五入到小數兩位。
+
+- 帳單剩餘應繳是當期帳單扣除已繳後仍待繳的金額；溢繳可為負數。繳款狀態與 `noPaymentNeeded` 仍只依當期帳單判斷。
+- 未出帳總額是已入帳但尚未結帳的消費淨額，退款與回饋保留正負號；不含繳款，避免與帳單已繳金額重複扣除；也不含即時授權（待入帳）。
+- 優先採用銀行的官方未出帳總額；銀行沒有總額時，只能加總本次回應的完整未出帳明細，不得累加本機歷史交易。任一部分無法確認時不建立快照，不把未知部分當成 0。
+- 各來源只負責解析這兩個金額；國泰、新光沒有未出帳資料，遠東商銀改用額度頁「已使用額度」，見各來源說明。
 
 ## 信用卡交易階段與共用配對
 
@@ -191,6 +213,7 @@ promotion 放在同一 D1 batch，沿用來源的 lock 與設定版本 guard。�
 - 手動／排程必須把 `createSyncExecution` 的 scoped env 傳給來源同步，不得改用原始 DB 寫入金融資料、session、cursor 或結果。CAPTCHA preparation 同樣使用 scoped env，並維持 3 分鐘期限。Browser 透過共用 launch／connect helper 接收取消訊號；durable HTTP client 傳遞 `syncSignal`。
 - 一般同步的 connector 在登入成功、開始取得資料時呼叫 `reportSyncProgress("fetching")`（`sources/sync-progress.ts`）；登入與儲存階段由共用執行流程回報。
 - 需要 CAPTCHA／OTP 時，runtime registry 提供 `prepareChallenge`，route 只處理輸入驗證與 HTTP error mapping。
+- API 型 CAPTCHA 來源（兆豐、王道、將來銀行）的自動辨識使用 `sources/captcha-retry.ts` 的 `runAutoCaptchaAttempts`，規則與台新相同：每輪取得新驗證碼、辨識並登入，最多辨識六張、最多向銀行送出三次登入。辨識結果不符格式時拋出 `CaptchaUnreadableError`，不送出登入、不扣登入額度；只有銀行明確回覆驗證碼錯誤時扣登入額度並換新驗證碼。帳密遭拒、登入結果不明或辨識服務不可用立即停止，不重送帳密；耗盡時分別提示登入送出次數或辨識上限，並標記 `needs_user_action`。人工輸入的驗證碼只使用一次。重試只記 `auto_captcha_retry` 的來源、結果分類、累計辨識與登入次數。Browser 型來源因換圖、重開頁面與時間預算各不相同，仍維持各自的重試實作。
 - 排程不得主動寄送 OTP；需要互動時標記 `needs_user_action`。
 - 若外部服務支援接管其他登入中的裝置，必須明確定義手動與排程的 `force` policy，並在介面與使用文件提示可能中斷使用者目前的工作階段。
 - 新 connector 必須透過 D1 migration 建立 `<connectorId>:all` sync job，預設停用並跟隨預設排程。所有來源首次成功同步後自動啟用；失敗或等待驗證不啟用，之後手動停用及既有自訂排程都會保留。
@@ -325,7 +348,7 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 
 登入後的網銀頁面（例如存款交易明細）可能再顯示 Chakra 公告，按鈕為「不要再顯示」與「下次再提醒」，且會鎖住鍵盤焦點，使帳號／期間選單收不到 ArrowDown。操作選單前先只點「下次再提醒」關閉，不點「不要再顯示」以免變更使用者的公告設定；公告若在頁面載入後才出現，選單未展開時關閉公告並重試一次，最多處理五則。
 
-存款明細只從總覽進入一次，其餘帳戶使用明細頁的 react-select 帳號選單切換，避免反覆開啟總覽造成 `/OnlineBanking/Logout/SystemError`。帳號與期間以選單外層控制項的文字辨識，以 ArrowDown 開啟並選取完整帳號或期間文字，確認控制項已更新後繼續。找不到帳戶或指定期間時整次失敗，不沿用預設期間或略過帳戶。
+存款明細只從總覽進入一次，其餘帳戶使用明細頁的 react-select 帳號選單切換，避免反覆開啟總覽造成 `/OnlineBanking/Logout/SystemError`。帳號與期間以選單外層控制項的文字辨識，以 ArrowDown 開啟並選取完整帳號或期間文字，確認控制項已更新後繼續。找不到帳戶或指定期間時整次失敗，不沿用預設期間或略過帳戶。操作選單前若明細頁有可見的公告對話框（例如「系統維護公告」）蓋住選單，只點「下次再提醒」「我知道了」「關閉」等明確關閉按鈕，不點「不要再顯示」（會改帳戶偏好），內容涉及登入、裝置、驗證、授權、密碼或轉帳時不點；log `cathaybk_detail_dialog` 只記固定欄位（是否擋下、實際點的允許按鈕、按鈕數、標題長度、是否為維護公告），不記對話框原文。
 
 進入明細頁時先完成自動送出的 30 天查詢，每個帳戶再依共用回溯 policy 選取期間並按「查詢」。選單切換後只等待存款明細請求完成及 500 毫秒無新請求，不受分析／追蹤服務的持續連線影響；逾時或請求失敗即中止。按鈕操作前註冊 request 與 response 監聽，以本次 request 物件對應 response，避免將先前查詢的空回應當成本次結果。請求的 `content.queryFilters` 必須只有所選帳戶，`startDate`／`endDate` 的含首尾天數須符合查詢期間。`B_ACCT_Q_TransferDetail` 的請求與回應帳號允許前置補零，其餘必須與所選完整帳號一致。
 
@@ -342,6 +365,8 @@ Migration `0043_merge_legacy_invoice_duplicates.sql` 以相同發票號碼整併
 外幣活存欄位與空帳戶／失敗旗標語意依 2026-10-06 取得的官方 `FDepInqContext-_BabElsu.js`、`index-Df9J0qxz.js` 與主程式核對。新增三個核心案例，以合成資料驗證同帳號多幣別及小數餘額、成功無帳戶與失敗不誤判；依本文件的敏感資料規則，擴充多幣別案例確認兩種 `raw` 僅保存末四碼與白名單欄位。尚未取得有外幣帳戶的真實回應，也尚未完成登入後的無外幣分支與完整同步驗證。
 
 OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒頁並停在 `/MyBank/Quicklinks/Home`，擋住信任裝置設定。同步會點選「暫不變更」略過提醒，不變更使用者的密碼；該頁也視為 OTP 驗證成功。信任裝置是否完成，除頁面上的成功訊息外，也以 `CUB.eBank.DeviceId` cookie 輔助確認；該 cookie 可能是 HttpOnly，須由瀏覽器端（CDP）讀取，`document.cookie` 看不到。兩者都偵測不到時記錄不含個資的 `cathaybk_trusted_device_not_detected` 並回報未完成。
+
+國泰當期與歷史帳單於單次同步內按帳戶、期別及幣別合併，當期資料優先；若當期應繳總額無法解析，則保留同一期歷史總額（包含 0 及負值），當期明確提供的 0 仍優先。不同幣別使用不同帳戶 ID。跨次同步仍以既有 `(connector_id, account_id, billing_period)` 原位更新，不另建歷史副本。`HistoryBillList` 僅在提供有限數值的 `twdAmount` 時更新應繳總額（包含 0 及負值）；缺漏或無效金額依共用缺欄保留規則處理，source、raw 與更新時間仍反映最新來源。國泰本次明確回報為未繳的當期帳單，由 `sync.ts` 以 `creditCardBillRecord(...).recordKey` 取得 ID，交給來源 `repository.ts` 的 `reconcileCathayUnpaidCurrentBillStatements`，在 `afterPromoteStatements` 僅將指定 ID、`connector_id = 'cathaybk'` 且 `is_paid = 1` 的帳單修正為 0，亦可修復舊版誤判已繳資料；歷史帳單與未知狀態不觸發此修正。這不變更使用者繳款 override，也不加入查詢失敗時的 fail-soft。
 
 ### 永豐銀行
 
@@ -370,8 +395,12 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 負值為欠款，正值為溢繳餘額；餘額非負時標記無需繳款。已繳款為 0 且應繳總額為正時，帳單狀態為待繳。缺少已繳款欄位或無法解析時不建立該筆帳務快照，
 台幣總覽的負應繳金額仍保留為正餘額，不取絕對值或歸零。
 結帳日與繳款期限分別取自 `BaseData.STMTDATE`、`BaseData.DUEDATE`；保留既有台幣歷史帳單查詢。
-外幣未列於本期 `BillAmounts` 時，使用銀行本次 `OutstandingDetail.SubTotal` 小計作為未出帳負債快照，
-不建立帳單、不填入繳款期限；不得累加本機歷史交易替代本次小計。資產頁對未知信用卡餘額顯示
+負債快照依共用規則再加上各幣別未出帳總額。已請款明細 `OutstandingDetail.Detail` 會包含本期
+繳款（如「永豐自扣已入帳」），小計 `SubTotal` 是否扣掉繳款未能確認；因此以本次明細扣除繳款列
+（摘要含「自扣」或「繳款」的貸方）後的加總為未出帳總額，並要求小計等於本次明細全部加總或扣除
+繳款後的加總。小計與明細對不上時視為該幣別負債未知，不建立快照。
+外幣未列於本期 `BillAmounts` 時，負債只有該幣別未出帳總額，
+不建立帳單、不填入繳款期限；不得累加本機歷史交易。資產頁對未知信用卡餘額顯示
 「剩餘應繳金額未取得」，相關負債合計顯示「資料不完整」。繳款狀態以銀行已入帳資料為準，
 官方頁面說明付款後約需 1 至 3 個營業日入帳。
 
@@ -477,6 +506,12 @@ OTP 通過後，國泰可能先顯示「密碼已超過半年未更新」提醒�
 2026-10-07 已以真實帳戶通過本機自動登入、密碼通知關閉、完整手動同步、session 重用及重複同步不新增副本；帳單已繳清時的未出帳負債已與官方畫面、本機 D1、API 及資產頁核對一致。其他帳務逐項核對、Richart 可見範圍、人工驗證、排程與 Cloudflare 部署環境的實際操作仍待驗收。
 
 ### 中國信託銀行
+
+外幣先沿用總覽的 `fxAcctSummaryResponse`，缺少時查 `/twrbm-fx/qu001/010`，再用 `/twrbm-fx/qu002/010`、`/011` 取得原幣餘額與近三個月交易。
+外幣帳戶 `sourceId` 為 `bank:ctbc:<末四碼或unknown>:<完整帳號SHA-256>:<幣別>`，`raw` 僅保存末四碼與幣別。
+明確無活存狀態 `9002`／`9004` 視為空清單；外幣查詢要求重新驗證時，原樣傳遞 `CtbcVerificationRequiredError` 並中止本次同步，讓使用者收到驗證提示。其他外幣失敗記固定警告並略過整個外幣區塊，保留舊資料，臺幣與信用卡仍可更新。
+信用卡補查帳期與完整分頁；缺日期／金額或分頁資料不完整時失敗。每個幣別一個共用信用卡帳戶，名稱固定為「中國信託信用卡」，帳單與負債維持一份。交易的 `cardLast4` 取自 `cardNoSuffixFour`、`cardNo`、`fullCardNo`，先移除尾端 `_…` 標記，欄位互相矛盾時留空；`cardName` 只在 `cardDataList` 中該末四碼唯一且有卡名時填入。
+信用卡負債依共用規則為最新一期帳單剩餘應繳加上 `qu006` 已入帳未結帳明細的淨額；中信未提供已對應的官方總額，因此加總本次完整分頁明細，並排除摘要含「繳款」「扣繳」「自扣」的貸方，即時授權不計入。尚無帳單的幣別只計未出帳淨額。
 
 連接器的 `appVer` 使用 `5.2.26`；2026-10-10 核對
 [Google Play 台灣版](https://play.google.com/store/apps/details?id=com.chinatrust.mobilebank&hl=zh_TW&gl=TW)
@@ -588,7 +623,8 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 
 中信同步會比對本次資料與已保存的授權。配對成功後可見列為待入帳原列：升為已入帳並
 沿用其 ID、消費時間與使用者設定；名稱、入帳日與正式金額改用已入帳明細，再刪除已入帳
-重複列。待入帳若已有分類且不是未分類，保留待入帳分類；待入帳未分類則沿用已入帳分類。
+重複列。待入帳缺少 `card_last4`／`card_name` 時從已入帳補上，已有值則保留。
+待入帳若已有分類且不是未分類，保留待入帳分類；待入帳未分類則沿用已入帳分類。
 計算偏好與發票以待入帳既有設定優先，沒有時才從已入帳補上；兩端都連結發票時保留原交易
 與設定、不合併，避免刪除使用者決定。先前以
 `matched_transaction_id` 隱藏待入帳的舊配對，下次中信同步會改為此合併。
@@ -609,6 +645,8 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 不得將 `NA` 當成零；其他無法辨識的欠款文字仍使同步失敗。
 
 ### 王道銀行
+
+- 排程與未帶人工驗證碼的手動同步以 Workers AI 辨識四位英數驗證碼，依共用自動驗證碼重試政策（最多辨識六張、送出三次登入）；只有 `ObankCaptchaRejectedError` 會重試。
 
 #### 定存生命週期
 
@@ -680,7 +718,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 樂天每次同步都需要 4 位英數圖形驗證碼，並重新以 Browser Run 登入（`browser_captcha_session`，但不復用 session）。手動與排程同步預設以 Workers AI 自動辨識，只有「驗證碼錯誤」（含辨識結果長度或字元不符）會重試，最多三次；連續失敗、辨識服務不可用或剩餘時間不足時拋出 `ManualCaptchaRequiredError`（HTTP 400 `MANUAL_CAPTCHA_REQUIRED`），標記 `needs_user_action`，前端接著呼叫 `prepareChallenge` 取得人工驗證碼。人工驗證碼有效時優先使用，逾時則退回自動辨識。
 - 同步臺幣活存帳戶、每日餘額快照、臺幣活存交易明細與貸款。登入後由頁面在載入前注入的攔截器讀取網頁自己解密後的首頁 API（`CHMQU0001`）回應，取不到時才改讀「臺幣存款」頁面文字。存款採白名單：只接受主帳號或明確標示為樂天（銀行代碼 826）的臺幣帳戶，他行、外幣與轉入對手帳號一律排除；解析不到存款視為頁面結構改變並整次失敗。
 - 餘額快照 `sourceId` 帶上 UTC 日期（`snapshot:rakuten:<帳號>:TWD:YYYY-MM-DD`），每天保留一筆，同一天多次同步只覆寫當天那筆。
-- 貸款在首頁存款之後、活存明細之前讀取（階段 `fetch_loan`）：點頁首選單「我的貸款」，讀取攔截到的完整版 `CLNQU0001/010` 解密後回應，只接受貸款項目帶有 `initPeriod` 等條件的回應（首頁登入時送出的精簡版只有名稱與剩餘金額，等不到完整版才退回精簡版，再由畫面文字補利率、期數與下次扣款）；API 取不到貸款時改讀頁面文字。輸出 `loan:rakuten:<hash>` 貸款帳戶（`loanCategory` 為 `other`、`loanInterestRate`）與剩餘本金快照（`loanPaymentAmount`、`loanInstallmentsPaid`／`loanInstallmentsTotal`），條件寫入 raw（`initialAmount`、`totalPeriods`、`remainingPeriods`、`annualRatePct`、`paymentDay`（取 `monthlyRepayDay`）、`nextPaymentDate`／`nextPaymentAmount`、`drawdownDate`）。sourceId 只由貸款名稱雜湊，各路徑對同一筆貸款得到相同 ID。存款與貸款各自獨立解析，但沒有解析出存款時仍視為頁面結構改變而整次失敗，不以只有貸款的結果當作成功。
+- 貸款在首頁存款之後、活存明細之前讀取（階段 `fetch_loan`）：點頁首選單「我的貸款」，讀取攔截到的完整版 `CLNQU0001/010` 解密後回應，只接受貸款項目帶有 `initPeriod` 等條件的回應（首頁登入時送出的精簡版只有名稱與剩餘金額，等不到完整版才退回精簡版，再由畫面文字補利率、期數與下次扣款）；API 取不到貸款時改讀頁面文字。輸出 `loan:rakuten:<hash>` 貸款帳戶（樂天的貸款產品為個人信用貸款，`loanCategory` 為 `personal`；並寫入 `loanInterestRate`）與剩餘本金快照（`loanPaymentAmount`、`loanInstallmentsPaid`／`loanInstallmentsTotal`），條件寫入 raw（`initialAmount`、`totalPeriods`、`remainingPeriods`、`annualRatePct`、`paymentDay`（取 `monthlyRepayDay`）、`nextPaymentDate`／`nextPaymentAmount`、`drawdownDate`）。sourceId 只由貸款名稱雜湊，各路徑對同一筆貸款得到相同 ID。存款與貸款各自獨立解析，但沒有解析出存款時仍視為頁面結構改變而整次失敗，不以只有貸款的結果當作成功。
 - 臺幣活存明細在首頁存款讀取完成後才進行：點頁首選單「存款」→「臺幣存款」，讀取頁面攔截到的 `CTWQU0001/010`（當月）回應；再開頁面的月份下拉選單，依按鈕顯示的當月往前選月份，讀取 `CTWQU0001/011` 回應，共取 `BANK_SYNC_MONTHS`（3）個月。下拉按鈕與選項由 Angular 在回應到達後才渲染，找不到時每 200 毫秒重試、最多等 3 秒，且不得點彈出視窗裡的元素。每月的 `txDetails` 由 `apps/worker/src/sources/rakuten/deposit-transactions.ts` 解析：`amt` 沒有正負號、`amtSign` 語意也沒有保證，因此收支方向由相鄰兩筆交易後餘額的差推得，每月最舊一筆沒有前筆可比，只有在其他筆的餘額差與 `amtSign` 一致印證時才採用 `amtSign`，仍得不到方向的月份整月略過而不猜測。交易 `sourceId` 以 17 碼 `pk` 為主，沒有時才以日期、時間、金額、類型與餘額組合，交易對象若有非數字的約定帳號暱稱就用暱稱，否則對手帳號只保留末四碼（`****1234`），不寫入完整帳號；備註夠短才附在交易類型後。目前尚未實作分頁：回應標示 `dataEnd === false` 或 `dataLimit === true` 時保留已回傳的資料並記錄 `rakuten_tx_truncated`；沒有交易的月份不算截斷。
 - 明細只是附加資料：找不到選單、月份下拉、回應逾時、時間不足或整月解析失敗，都只記錄事件（`rakuten_tx_fetch_skipped`、`rakuten_tx_fetch_failed`、`rakuten_tx_skipped`，內容只有原因代碼與月數、筆數），不讓同步失敗，餘額快照照常寫入。
 - 同步逾時上限為 55 秒（登入、首頁存款與貸款）；活存明細與其後的解析階段使用延長後的 75 秒期限，並固定保留 8 秒給登出與收尾，剩餘時間不足 5 秒就不再抓下一個月份。每次同步結束一律點頁首「登出」並確認，再關閉瀏覽器，登出失敗只記錄事件，不影響同步結果。同步摘要 log 另含 `depositTxnMonthsFetched`、`depositTxnCount`、貸款讀取結果 `loanSource`、`loanAccountCount`、`loanTermCount` 與各階段耗時 `loginMs`、`dashboardMs`、`loanMs`、`depositTxnMs`、`logoutMs`。
@@ -696,7 +734,7 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 
 - 使用 App 2.5.19 的 MobileFirst API：OAuth client credentials、`/main/init`、App 初始化、五位數字驗證碼、E2EE RSA／TripleDES 帳密登入。一般登入不要求快速登入或裝置綁定。
 - 對 `https://mobile.megabank.com.tw` 的 POST 由單一 SQLite Durable Object `MegabankEgress` 轉送。物件名稱固定為 `megabank`，`locationHint` 為 `apac`，只在首次建立時決定機房，之後手動同步與 Queue 排程都從該機房連出。只允許這個 host 的 POST。Workers 免費方案可使用 SQLite Durable Objects，每日包含 100,000 次請求與 13,000 GB-s；一次同步遠低於這個額度。這固定的是執行機房。同一機房仍可能有多個出口 IP，因此不能保證銀行永遠不要求簡訊。
-- 人工驗證碼的待登入 session 只保存於 `encrypted_config`，兩分鐘到期，成功或失敗後清除；排程同步使用 Workers AI 辨識。`sync_cursor` 只含同步時間。
+- 人工驗證碼的待登入 session 只保存於 `encrypted_config`，兩分鐘到期，成功或失敗後清除；排程同步使用 Workers AI 辨識，依共用自動驗證碼重試政策（最多辨識六張、送出三次登入），只有登入回應 `0113`（圖形驗證碼錯誤）會重試，每輪重新初始化並沿用同一組虛擬裝置。`sync_cursor` 只含同步時間。
 - 登入回應的 `resultType` 與官方網銀前端相同：`0` 成功、`1` 重複登入、`3` 提示綁定裝置、`6` 已有兩台裝置、`7` 已綁定等；`3` 不影響查詢權限，連接器不做裝置綁定。`isTrustUser` 是信託戶旗標，與裝置信任無關。
 - 登入後 `secondFactorFlag=Y` 為雙重驗證，連接器不支援，登出並中止；其餘先查詢帳務，即使 `isHighIpFar=true`（異地登入旗標）也不預先要求簡訊。只有存款或信用卡查詢實際回 `SYS014`「權限不足」，且登入回應帶有異地旗標時，才進入既有簡訊驗證流程；以結構化銀行回應碼判斷，不比對錯誤文字。存款或信用卡等必要查詢失敗時，不回傳部分帳務；貸款查詢依下方的附加資料政策處理。
 - 查詢權限不足後的異地驗證只在手動同步處理：以 `megapmb` 呼叫 `/fco/fco00001/getverifycode`（`type=sms`）請銀行寄簡訊，回應的 `checkCode`（簡訊檢核碼）放入 `MEGABANK_SMS_OTP_REQUIRED` 訊息供使用者對照；已登入的工作階段以 `authenticated=true` 序列化後寫回 `encrypted_config` 的 `pendingSession`，三分鐘到期、只供這一次驗證使用。使用者送出 `otp` 後呼叫 `/fco/fco00001/validatecode`，`success=true` 才接續同一個登入重新查詢完整帳務並登出；`success=false` 回 `MEGABANK_OTP_INVALID` 並保留工作階段讓使用者重輸；非 `0000` 代碼、逾時或其他錯誤一律登出並清除狀態。排程同步同樣先查詢，只有查詢權限不足且帶有異地旗標時才登出、標記需要使用者處理，不觸發簡訊。
@@ -770,9 +808,37 @@ Email、Email 驗證識別或完整銀行回應，也不放入 `sync_cursor`、�
 - 數字與日期逐值驗證：金額接受千分位、小數、正負號、括號負數、後置負號、全形數字與 `NT$`／`元`／幣別前後綴，空白與 `-`／`--`／`－` 佔位符視為無值，千分位錯置或非數字一律拒絕（不產生 NaN）；日期接受西元 `YYYY/MM/DD` 與民國 `yyy/mm/dd`、`yyy.mm.dd`、`民國yyy年m月d日`，拒絕不存在的日期與 1990～2100 年以外的值；交易時間以 `+08:00` 保存。交易列的支出／存入必須恰有一欄有非零金額。
 - Log 只記錄事件、錯誤碼、筆數與去除 query 的路徑；不記錄帳密、帳號、卡號、OTP、頁面內容或 token。`raw` 只保留末四碼與白名單欄位。
 
+### 遠東商銀
+
+> 頁面結構依 2026-10-17 使用者提供的 HAR（登入、密碼變更提醒、帳戶總覽、存款明細、信用卡額度與帳單明細）整理，fixture（`apps/worker/tests/sources/feib/fixtures/`）的帳號、卡號、分行、商店與金額皆為合成值。尚未以真實帳號完成部署後的完整同步；不確定處在程式中以 `TODO(feib-live)` 標示。
+
+#### 登入
+
+- 使用個人網路銀行 `Logon/mainIndex6.jsp?loginpage=new` 的「個人戶」頁籤：`#cid0` 身分證字號、`#uid0` 使用者代號、`#pad0` 密碼、`#VERCODE0` 6 位數字驗證碼（`/netbank/VerifyCodeServlet` 的 100×30 JPEG）。連接器只在真實頁面填入欄位並點擊 `#submitbtn`，由官方 `submitForm()` 以 TWCA E2EE（RSA）加密帳密後 POST `TrxDispatcher`（`trx=com.lb.wibc.trx.Login`、`state=login`），不自行組裝登入請求。
+- 官方 `submitForm()` 先以 `ajaxServlet.jsp?func=verifyCode` 同步檢核驗證碼；錯誤時標示 `#vercode0area.inp-error` 並換圖，不會送出帳密。連接器以請求監聽確認是否實際送出登入 POST：未送出且只有驗證碼錯誤時才換圖重試（自動辨識最多三輪、每輪最多三張圖）；其他欄位格式錯誤、帳密錯誤、鎖定、重複登入與結果不明一律立即停止，避免連續錯誤三次遭停用。自動辨識耗盡時回 `MANUAL_CAPTCHA_REQUIRED`，可經 `/api/connectors/feib/captcha` 改用人工輸入。
+- 登入送出後的錯誤頁或 alert 文字只在記憶體內分類（帳密／鎖定／重複登入／驗證碼／維護），log 只記分類結果。帳密錯誤、鎖定的真實頁面尚未取得。
+- 年度密碼變更提醒（`SSLPwdChng/SSLPwdChngPrompt.jsp`）只導覽官方「下次登入再變更」連結（`trx=…Login&state=loginAFT&lgstatus=total&menu_id=1-1-1`），並記錄 `feib_password_change_prompt`；不變更密碼，也不使用會改變提醒設定的「不變更」（`state=fix`）。
+- 不復用網銀 session：每次同步重新登入，結束時（成功或失敗）只要曾送出登入就導覽官方 `toLogout()` 網址 `trx=…Logout&state=verifyCard`。`browserSessionId`、`captcha` 為一次性人工驗證狀態，只存於 `encrypted_config`。
+
+#### 資料
+
+| 頁面                                                     | 用途                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 我的存款 `Logon/SvDeposit.jsp`（menu `2-1-1`）           | 「活期性存款」表的帳號、帳戶類別、幣別與餘額；`selFun1(…)` 提供幣別代碼（新臺幣 `00`）。定期性存款不納入。                                                                                                                                                                                                                                                     |
+| 存款交易明細 `SavAcctTxDtlInq`（menu `2-1-3`）           | 帳號選單 `#acct`，以官方 `checkData('A')` 送出。單次期間依官方 `checkDate2` 不超過二個月，同步的近三個月切成不重疊的整日期間。結果表 `交易日期｜帳務日期｜摘要｜支出金額｜存入金額｜帳戶餘額｜備註｜用途`；頁面回顯的帳號與起迄日須與查詢一致。查無交易時沒有結果表格，視為 0 筆。不使用「確認用途」等會寫入銀行端的功能。                                     |
+| 信用卡可用額度 `CCMember/queryCardLimit.jsp`（`5-1-4`）  | 帳單結帳日、本期應繳總額、最低應繳、本期累積已繳金額、繳款截止日與信用額度／已使用／可使用額度。只有移除 HTML 註解後仍出現「未持本行有效卡片」且沒有帳單表時才視為無卡（文案僅以合成 fixture 驗證）。                                                                                                                                                          |
+| 帳單明細 `CCMember/eStatementQry_success.jsp`（`5-1-1`） | 帳單年月選單 `#yyyyMm` 的顯示值為帳單月份（送出值為前一個月）；只送出 `mainForm` 的 `state=eStatementQry`，不呼叫可能進入繳款的 `formSubmit`。結帳日／繳款截止日為民國年；明細只有 `mm/dd`，依結帳日推得年份（晚於結帳日視為前一年）。卡片列「卡號：…末四碼」（全形）切換之後明細的卡號，之前的繳款列以 `account` 代替；沒有消費日的摘要列略過。同步最近三期。 |
+
+- 存款帳戶 sourceId 為 `bank:feib:<末四碼>:<完整帳號 SHA-256 前 16 碼>:<幣別>`，銀行代碼 `805`，已加入直接存款來源。交易 sourceId 由帳號、幣別、交易日期、帳務日期、帶正負號金額、交易後餘額與摘要雜湊並加同一查詢期間內的序號；交易日期存為 `authorizedAt`（只有日期），帳務日期為 `postedDate`；備註中的帳號遮罩為末四碼。
+- 信用卡交易 sourceId 為 `feib:card:tx:v1:<帳單期別>:<卡號末四碼或 account>:<消費日>:<帶正負號金額>:<序號>`；含帳單期別以區分各期分期（原始消費日與金額相同），序號只在同一期帳單內累計，帳單窗口位移時 ID 不變。銀行臺幣金額正數為消費（存為負數），負數為繳款／退款／回饋（存為正數）。目前只有帳單明細（`posted`），未出帳消費尚未接入，因此不接共用授權配對。
+- 繳款狀態：與額度頁結帳日相同的帳單依「本期累積已繳金額」判定；較早期別以下一期的「上期應繳總額」（須等於該期應繳總額）與「已繳款/退款金額」推得，對不上時為未知。已設定自動轉帳且未過截止日為 `autopay_pending`（未繳）；過截止日仍未繳清為 `overdue`。
+- 信用卡負債快照採額度頁「已使用額度」的相反號；帳單保留原應繳總額。已使用額度是否含分期未到期金額尚待確認。
+- 部分失敗容錯與台北富邦相同：登入、工作階段結束與瀏覽器斷線使整次同步失敗；登入後單一頁面／期間／帳單失敗只略過該項，連續三項失敗即停止，結束時記錄 `feib_sync_summary` 與 `feib_sync_result`。Log 只記事件、分類、筆數與去除 query 的路徑，不記帳密、帳號、姓名、餘額或頁面文字。
+- 外幣活存交易、定存、貸款、未出帳消費尚未接入。
+
 ## 將來銀行
 
-使用網銀帳密，直接呼叫網銀內部 Web API 登入與查詢；圖形驗證碼支援 AI 自動辨識或人工輸入。單次登入、查詢後登出，不接管其他工作階段。主帳戶查詢最近三個月，活存口袋讀取所有分頁後依日期篩選；定存口袋同步餘額，基金與美股未接入。排程建立時停用，首次成功同步後自動啟用。設定 CAS 與原子寫入 guard 防止查詢期間變更帳密後仍寫入舊結果。
+使用網銀帳密，直接呼叫網銀內部 Web API 登入與查詢；圖形驗證碼支援 AI 自動辨識或人工輸入。自動辨識依共用自動驗證碼重試政策（最多辨識六張、送出三次登入），只有 `CAPTCHA_ERROR`／`CAPTCHA_EXPIRED` 會換新驗證碼重試；每個驗證碼只送出一次。單次登入、查詢後登出，不接管其他工作階段。主帳戶查詢最近三個月，活存口袋讀取所有分頁後依日期篩選；定存口袋同步餘額，基金與美股未接入。排程建立時停用，首次成功同步後自動啟用。設定 CAS 與原子寫入 guard 防止查詢期間變更帳密後仍寫入舊結果。
 
 ## 鏈上錢包（比特幣、以太坊）
 

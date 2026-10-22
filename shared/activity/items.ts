@@ -24,6 +24,7 @@ export interface ActivityTransaction extends MatchingTransaction {
     categoryId: string;
     source: ActivityItem["classificationSource"];
     ruleId?: string;
+    refund?: boolean;
   };
 }
 export interface ActivityInvoice extends MatchingInvoice {
@@ -62,7 +63,8 @@ export function formatTradeQuantity(
   }
   return `${formatNumber(trade.quantity)} 股`;
 }
-function normalizeFinancialDate(value?: string) {
+/** 將民國年 `0YYY-MM-DD` 轉成西元日期；其他格式原樣回傳。 */
+export function normalizeFinancialDate(value?: string) {
   if (!value) return "";
   const roc = value.match(/^0(\d{3})-(\d{2})-(\d{2})(.*)$/);
   return roc ? `${Number(roc[1]) + 1911}-${roc[2]}-${roc[3]}${roc[4]}` : value;
@@ -122,6 +124,7 @@ export function buildActivityItems(
         classificationPattern: t.counterparty ?? t.description ?? undefined,
         classificationSource: t.classification?.source ?? "fallback",
         classificationRuleId: t.classification?.ruleId,
+        refund: t.classification?.refund,
         transactionId: t.id,
         invoiceId: matchedInvoice?.id,
         invoiceAmount: matchedInvoice?.amount,

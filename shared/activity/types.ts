@@ -20,10 +20,14 @@ export interface ActivityItem {
     | "system_rule"
     | "auto_transfer"
     | "auto_offset"
+    | "auto_refund"
+    | "ai"
     | "fallback";
   classificationRuleId?: string;
   transactionId?: string;
   excludedFromCalculation?: boolean;
+  /** A merchant refund that reduces its category's expense. */
+  refund?: boolean;
   invoiceId?: string;
   invoiceAmount?: number;
   status: string;

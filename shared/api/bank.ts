@@ -56,9 +56,13 @@ export interface BankTransactionResponse {
       | "system_rule"
       | "auto_transfer"
       | "auto_offset"
+      | "auto_refund"
+      | "ai"
       | "fallback";
     ruleId?: string;
     excludedFromCalculation?: boolean;
+    /** A merchant refund that reduces its category's expense instead of counting as income. */
+    refund?: boolean;
   };
 }
 

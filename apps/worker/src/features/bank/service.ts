@@ -1,6 +1,7 @@
 import {
   listBankAccounts,
   listBankTransactions,
+  listBankTransactionsForRefundMatching,
   listBankTransactionsForTransferMatching,
   listBankTransactionsInRange,
   listCreditCardBills,
@@ -25,11 +26,18 @@ import {
   listEnabledClassificationRules,
   type ClassificationRuleMatchRow,
 } from "../classification/repository";
+import { listAiClassifications } from "../classification/ai-repository";
 import {
   findAutomaticCreditOffsetTransactionIds,
   findAutomaticTransferTransactionIds,
   getAutomaticTransferDay,
 } from "./transfer-matching";
+import {
+  findSameDayRefundOffsetTransactionIds,
+  isRefundCandidate,
+  matchRefundsToPurchases,
+  refundOriginalDayRange,
+} from "./refund-matching";
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
@@ -110,22 +118,39 @@ async function presentBankTransactions(
   // outside the page need a further round trip.
   const pageOverrides = loadClassificationOverrides(db, transactions);
   // The counterpart can be on another page, so expand the set before classifying.
-  const transactionsForClassification = await loadTransferCandidates(
-    db,
-    transactions,
+  const [transferCandidates, refundPurchaseCandidates] = await Promise.all([
+    loadTransferCandidates(db, transactions),
+    loadRefundPurchaseCandidates(db, transactions),
+  ]);
+  const transactionsById = new Map(
+    transferCandidates.map((transaction) => [transaction.id, transaction]),
   );
+  for (const candidate of refundPurchaseCandidates)
+    if (!transactionsById.has(candidate.id))
+      transactionsById.set(candidate.id, candidate);
+  const transactionsForClassification = [...transactionsById.values()];
   const pageIds = new Set(transactions.map((transaction) => transaction.id));
-  const [rulesResult, pageOverridesResult, candidateOverridesResult] =
-    await Promise.all([
-      rules,
-      pageOverrides,
-      loadClassificationOverrides(
-        db,
-        transactionsForClassification.filter(
-          (transaction) => !pageIds.has(transaction.id),
-        ),
+  const [
+    rulesResult,
+    pageOverridesResult,
+    candidateOverridesResult,
+    aiClassificationsResult,
+  ] = await Promise.all([
+    rules,
+    pageOverrides,
+    loadClassificationOverrides(
+      db,
+      transactionsForClassification.filter(
+        (transaction) => !pageIds.has(transaction.id),
       ),
-    ]);
+    ),
+    settle(
+      listAiClassifications(
+        db,
+        transactionsForClassification.map((transaction) => transaction.id),
+      ),
+    ),
+  ]);
   let classificationMap: Map<string, ClassificationResult>;
   let classificationsReady = true;
   try {
@@ -148,24 +173,95 @@ async function presentBankTransactions(
     classificationMap = new Map();
     classificationsReady = false;
   }
+  // AI results only fill in what overrides and rules left unclassified.
+  if (classificationsReady && aiClassificationsResult.ok) {
+    for (const row of aiClassificationsResult.value) {
+      if (!row.categoryId || !row.label) continue;
+      if (classificationMap.get(row.transactionId)?.source !== "fallback")
+        continue;
+      classificationMap.set(row.transactionId, {
+        categoryId: row.categoryId,
+        label: row.label,
+        source: "ai",
+      });
+    }
+  } else if (!aiClassificationsResult.ok) {
+    console.error(
+      "[classify] load AI classifications failed:",
+      aiClassificationsResult.error,
+    );
+  }
 
-  const eligibleTransactions = transactionsForClassification.filter(
-    (transaction) => {
-      const classification = classificationMap.get(transaction.id);
-      return (
-        // An explicit include preference or user classification wins.
-        transaction.calculationPreference !== 0 &&
-        classification?.source !== "override" &&
-        classification?.source !== "user_rule"
-      );
-    },
-  );
+  const eligibleTransactions = transferCandidates.filter((transaction) => {
+    const classification = classificationMap.get(transaction.id);
+    return (
+      // An explicit include preference or user classification wins.
+      transaction.calculationPreference !== 0 &&
+      classification?.source !== "override" &&
+      classification?.source !== "user_rule"
+    );
+  });
   const automaticTransferIds = classificationsReady
     ? findAutomaticTransferTransactionIds(eligibleTransactions)
     : new Set<string>();
   const automaticCreditOffsetIds = classificationsReady
     ? findAutomaticCreditOffsetTransactionIds(eligibleTransactions)
     : new Set<string>();
+  const calculatedTransactions = transactionsForClassification.filter(
+    (transaction) =>
+      !resolveCalculationExclusion({
+        ...transaction,
+        classificationExcludedFromCalculation: classificationMap.get(
+          transaction.id,
+        )?.excludedFromCalculation,
+      }),
+  );
+  const refundPurchaseIds = classificationsReady
+    ? matchRefundsToPurchases(transactions, calculatedTransactions)
+    : new Map<string, string>();
+  // Month ranges hold both sides of a same-day pair, so no extra lookup is needed.
+  const sameDayRefundOffsetIds = classificationsReady
+    ? findSameDayRefundOffsetTransactionIds(
+        calculatedTransactions.filter((transaction) => {
+          const classification = classificationMap.get(transaction.id);
+          return (
+            // An explicit include preference or user classification wins.
+            transaction.calculationPreference !== 0 &&
+            classification?.source !== "override" &&
+            classification?.source !== "user_rule"
+          );
+        }),
+      )
+    : new Set<string>();
+
+  // A refund takes its purchase's category, also over an AI guess. A rule or
+  // manual category still wins, and only counts as a refund when it agrees
+  // with the purchase.
+  const refundClassification = (
+    transactionId: string,
+  ): ClassificationResult | undefined => {
+    const purchaseId = refundPurchaseIds.get(transactionId);
+    const own = classificationMap.get(transactionId);
+    const purchase = purchaseId ? classificationMap.get(purchaseId) : undefined;
+    if (!own || !purchase) return own;
+    if (own.source === "fallback" || own.source === "ai")
+      return {
+        categoryId: purchase.categoryId,
+        label: purchase.label,
+        source: "auto_refund",
+        refund: true,
+      };
+    return own.categoryId === purchase.categoryId
+      ? { ...own, refund: true }
+      : own;
+  };
+
+  const refundOrOffsetClassification = (transactionId: string) => {
+    const classification = refundClassification(transactionId);
+    return classification && sameDayRefundOffsetIds.has(transactionId)
+      ? { ...classification, excludedFromCalculation: true }
+      : classification;
+  };
 
   return transactions.map(
     ({
@@ -187,7 +283,7 @@ async function presentBankTransactions(
               source: "auto_transfer" as const,
               excludedFromCalculation: true,
             }
-          : classificationMap.get(transaction.id);
+          : refundOrOffsetClassification(transaction.id);
       return {
         ...normalizeBankTransactionDisplay(transaction),
         excludedFromCalculation: resolveCalculationExclusion({
@@ -253,6 +349,26 @@ function transferMatchKey(transaction: BankTransactionPageRow) {
   const currency = transaction.currency.trim().toUpperCase();
   if (!currency) return undefined;
   return `${day}\u0000${currency}\u0000${Math.abs(transaction.amount)}`;
+}
+
+/** Loads earlier card purchases that refunds on the page may return. */
+async function loadRefundPurchaseCandidates(
+  db: D1Database,
+  transactions: BankTransactionPageRow[],
+) {
+  const refunds = transactions.filter(isRefundCandidate);
+  const range = refundOriginalDayRange(refunds);
+  if (!range) return [];
+  try {
+    return await listBankTransactionsForRefundMatching(
+      db,
+      [...new Set(refunds.map((refund) => refund.accountId))],
+      range,
+    );
+  } catch (error) {
+    console.error("[refund] load refund candidates failed:", error);
+    return [];
+  }
 }
 
 export async function getCreditCardBillPage(
